@@ -1,0 +1,33 @@
+{
+  "name": "pet-project",
+
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "dev",
+  "workspaceFolder": "/workspace",
+
+  "remoteUser": "vscode",
+
+  "features": {
+    "ghcr.io/devcontainers/features/java:1": { "version": "25", "installGradle": "true" },
+    "ghcr.io/devcontainers/features/node:1": { "version": "lts" },
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {},
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {}
+  },
+
+  "forwardPorts": [8080, 5173],
+  "portsAttributes": {
+    "8080": { "label": "backend (Spring Boot)" },
+    "5173": { "label": "frontend (Vite)" }
+  },
+
+  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.gradle /workspace/frontend/node_modules",
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "dev.containers.gitCredentialHelperConfigLocation": "none"
+      }
+    }
+  }
+}

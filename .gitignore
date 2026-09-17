@@ -1,0 +1,15 @@
+# сборка
+target/
+build/
+node_modules/
+dist/
+.gradle/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# секреты и личные настройки
+.env
+.claude/settings.local.json
