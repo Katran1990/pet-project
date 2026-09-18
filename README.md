@@ -13,6 +13,7 @@ React single-page frontend.
 ## Layout
 
 ```
+.github/    CI workflows (tests, Docker image builds)
 backend/    Spring Boot application (dev.katran.pet)
 frontend/   Vite + React single-page app
 infra/      infrastructure files
@@ -64,3 +65,22 @@ Postgres and are meant for local development only.
 | `GET`  | `/api/greeting` | Returns the stored greeting     |
 | `POST` | `/api/greetings` | Creates a greeting ({"message": "..."}, 1-200 chars) |
 | `GET`  | `/actuator/health` | Application health           |
+
+## CI and Docker images
+
+- `.github/workflows/ci.yml` runs on every PR: backend `./gradlew build`
+  (compiles and runs tests), frontend lint and build.
+- `.github/workflows/build-images.yml` pushes
+  `ghcr.io/<owner>/<repo>/backend:<tag>` and
+  `ghcr.io/<owner>/<repo>/frontend:<tag>` on push to `development`/`main`,
+  tagged with the branch name and the commit SHA.
+- Build the images locally:
+
+  ```bash
+  docker build -t pet-backend backend
+  docker build -t pet-frontend frontend
+  ```
+
+- The backend image reads `DB_URL`, `DB_USER` and `DB_PASSWORD` at runtime.
+- The frontend image proxies `/api` to a host named `backend:8080`, which
+  must resolve when the container starts.
