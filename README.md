@@ -62,4 +62,5 @@ Postgres and are meant for local development only.
 | Method | Path            | Description                     |
 | ------ | --------------- | ------------------------------- |
 | `GET`  | `/api/greeting` | Returns the stored greeting     |
+| `POST` | `/api/greetings` | Creates a greeting ({"message": "..."}, 1-200 chars) |
 | `GET`  | `/actuator/health` | Application health           |
