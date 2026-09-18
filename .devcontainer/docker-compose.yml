@@ -1,29 +1,29 @@
 services:
 
-  # Контейнер, в котором работает Claude Code и все инструменты сборки
+  # Container that runs Claude Code and all the build tools
   dev:
     image: mcr.microsoft.com/devcontainers/base:ubuntu-24.04
     command: sleep infinity
     environment:
-      # Логин и настройки Claude Code хранятся в томе и переживают пересборку
+      # Claude Code login and settings are stored in a volume and survive rebuilds
       CLAUDE_CONFIG_DIR: /home/vscode/.claude
     volumes:
-      # Единственная папка вашего Mac, которую видит контейнер
+      # The only folder on your Mac that the container can see
       - ..:/workspace:cached
-      # node_modules живут только в контейнере (на Mac и в Linux они несовместимы)
+      # node_modules only live inside the container (incompatible between Mac and Linux)
       - frontend-node-modules:/workspace/frontend/node_modules
       - claude-config:/home/vscode/.claude
       - gradle-cache:/home/vscode/.gradle
 
-  # База данных для разработки. Из контейнера dev доступна как postgres:5432
+  # Database for development. Reachable from the dev container as postgres:5432
   postgres:
     image: postgres:17
     environment:
       POSTGRES_DB: app
       POSTGRES_USER: app
-      POSTGRES_PASSWORD: app   # только для локальной разработки
+      POSTGRES_PASSWORD: app   # for local development only
     ports:
-      # Чтобы подключаться из IDEA на Mac. 127.0.0.1 = не видно из сети
+      # To connect from IDEA on Mac. 127.0.0.1 = not visible from the network
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -33,7 +33,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # Redis добавим позже — раскомментируйте, когда понадобится кеш
+  # Redis will be added later — uncomment when needed for caching
   # redis:
   #   image: redis:7
   #   ports:
