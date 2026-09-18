@@ -21,7 +21,7 @@
     "5173": { "label": "frontend (Vite)" }
   },
 
-  "postCreateCommand": "sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.gradle /workspace/frontend/node_modules",
+  "postCreateCommand": "sudo chown vscode:vscode /home/vscode/.config && sudo chown -R vscode:vscode /home/vscode/.claude /home/vscode/.gradle /home/vscode/.config/gh /workspace/frontend/node_modules",
 
   "customizations": {
     "vscode": {
