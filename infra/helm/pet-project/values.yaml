@@ -1,0 +1,39 @@
+# Default values. Environment-specific overrides live in the `deploy` branch
+# (envs/dev/values.yaml, envs/prod/values.yaml) and are applied by Argo CD.
+
+imageRegistry: ghcr.io/katran1990/pet-project   # Must equal IMAGE_PREFIX from .github/workflows/build-images.yml (ghcr.io/<owner>/<repo>), lowercase - GHCR rejects uppercase names.
+
+backend:
+  image: backend
+  tag: development          # default only; the real tag comes from envs/<env>/values.yaml on the deploy branch
+  replicas: 1
+  resources:
+    requests: { cpu: 100m, memory: 384Mi }
+    limits:   { memory: 768Mi }
+
+frontend:
+  image: frontend
+  tag: development          # default only; the real tag comes from envs/<env>/values.yaml on the deploy branch
+  replicas: 1
+  resources:
+    requests: { cpu: 20m, memory: 32Mi }
+    limits:   { memory: 64Mi }
+
+postgres:
+  image: postgres:17
+  storage: 1Gi
+  db: app
+  user: app
+  # Dev credential only - the same throwaway app/app pair that backend's
+  # application.properties already defaults to. envs/prod/values.yaml on the
+  # deploy branch does NOT override it, so "prod" currently comes up with app/app.
+  # Replace with Sealed Secrets / External Secrets before prod is reachable
+  # from outside (follow-up card). Never put a real password into envs/* -
+  # update-deploy.yml prints those files with `cat`.
+  password: app
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits:   { memory: 384Mi }
+
+ingress:
+  host: dev.pet.local       # add to /etc/hosts: 127.0.0.1 dev.pet.local pet.local

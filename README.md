@@ -84,3 +84,16 @@ Postgres and are meant for local development only.
 - The backend image reads `DB_URL`, `DB_USER` and `DB_PASSWORD` at runtime.
 - The frontend image proxies `/api` to a host named `backend:8080`, which
   must resolve when the container starts.
+
+## Deploy (Helm + Argo CD)
+
+- `infra/helm/pet-project` — the chart (backend, frontend, in-cluster
+  Postgres, Ingress).
+- `infra/argocd/apps.yaml` — two Argo CD Applications (`pet-project-dev` ->
+  namespace `dev` from branch `development`, `pet-project-prod` -> namespace
+  `prod` from branch `main`); applied once by hand with
+  `kubectl apply -f infra/argocd/apps.yaml`.
+- Environment values live on the `deploy` branch (`envs/dev/values.yaml`,
+  `envs/prod/values.yaml`); `.github/workflows/update-deploy.yml` writes the
+  image tag there after a successful "Build images" run.
+- Add `dev.pet.local` / `pet.local` to `/etc/hosts` for the local k3d cluster.

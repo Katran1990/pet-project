@@ -1,0 +1,70 @@
+# Runs after "Build images" succeeds. Writes the new image tag (short commit SHA)
+# into envs/<env>/values.yaml on the `deploy` branch. Argo CD notices the commit
+# and rolls out the new version.
+#
+#   development -> envs/dev/values.yaml
+#   main        -> envs/prod/values.yaml
+name: Update deploy manifests
+
+on:
+  workflow_run:
+    workflows: ["Build images"]
+    types: [completed]
+    branches: [development, main]
+
+permissions:
+  contents: write        # to push to the deploy branch
+
+jobs:
+  update:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pick environment
+        id: pick
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          case "$HEAD_BRANCH" in
+            development) echo "name=dev"  >> "$GITHUB_OUTPUT" ;;
+            main)        echo "name=prod" >> "$GITHUB_OUTPUT" ;;
+            *) echo "unexpected branch: $HEAD_BRANCH"; exit 1 ;;
+          esac
+          # metadata-action's short SHA tag is the first 7 characters
+          echo "tag=${HEAD_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v6
+        with:
+          ref: deploy
+
+      - name: Set image tags
+        env:
+          TAG: ${{ steps.pick.outputs.tag }}
+          ENV_NAME: ${{ steps.pick.outputs.name }}
+        run: |
+          # yq v4 (mikefarah) is preinstalled on ubuntu-latest runners
+          FILE="envs/${ENV_NAME}/values.yaml"
+          yq -i ".backend.tag = strenv(TAG) | .frontend.tag = strenv(TAG)" "$FILE"
+          cat "$FILE"
+
+      - name: Commit and push
+        env:
+          ENV_NAME: ${{ steps.pick.outputs.name }}
+          TAG: ${{ steps.pick.outputs.tag }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add envs
+          git diff --cached --quiet && { echo "nothing changed"; exit 0; }
+          git commit -m "deploy(${ENV_NAME}): ${TAG}"
+          # The dev and prod runs write to the same branch and can collide.
+          # Rebase onto whatever landed first and retry; the two runs touch
+          # different files (envs/dev vs envs/prod), so the rebase is clean.
+          for attempt in 1 2 3; do
+            git push origin HEAD:deploy && exit 0
+            echo "push rejected (attempt ${attempt}), rebasing onto origin/deploy"
+            git pull --rebase origin deploy
+          done
+          echo "could not push to deploy after 3 attempts"
+          exit 1

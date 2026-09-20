@@ -1,0 +1,19 @@
+# Ingress = the entry point from outside the cluster.
+# k3d ships with Traefik as the ingress controller, nothing extra to install.
+# All traffic goes to the frontend; nginx inside it forwards /api to the backend.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pet-project
+spec:
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

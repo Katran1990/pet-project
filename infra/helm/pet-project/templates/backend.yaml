@@ -1,0 +1,49 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels: { app: backend }
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  selector:
+    matchLabels: { app: backend }
+  template:
+    metadata:
+      labels: { app: backend }
+    spec:
+      containers:
+        - name: backend
+          image: "{{ .Values.imageRegistry }}/{{ .Values.backend.image }}:{{ .Values.backend.tag }}"
+          ports:
+            - containerPort: 8080
+          env:
+            # "postgres" is the Service name defined in postgres.yaml
+            - name: DB_URL
+              value: "jdbc:postgresql://postgres:5432/{{ .Values.postgres.db }}"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef: { name: postgres-credentials, key: user }
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: postgres-credentials, key: password }
+          # Kubernetes waits for this before sending traffic to the pod
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          # Kubernetes restarts the container if this keeps failing
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: 8080 }
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources: {{- toYaml .Values.backend.resources | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend            # nginx.conf in the frontend proxies /api to http://backend:8080
+spec:
+  selector: { app: backend }
+  ports:
+    - port: 8080
+      targetPort: 8080
