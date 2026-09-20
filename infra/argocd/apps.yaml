@@ -1,11 +1,21 @@
 # Argo CD Applications. Apply once by hand: kubectl apply -f infra/argocd/apps.yaml
 #
 # Each app has two sources:
-#   1. the Helm chart from a code branch (development for dev, main for prod)
-#   2. environment values from the `deploy` branch, which must accept pushes from CI (see .github/workflows/update-deploy.yml)
+#   1. the Helm chart from this repo (branch development for dev, main for prod)
+#   2. environment values from the deploy repo
+#      (https://github.com/Katran1990/pet-project-deploy.git, branch main), which CI
+#      pushes to (see .github/workflows/update-deploy.yml). That repo is public, so
+#      Argo CD needs no repository credential (`argocd repo add`); making it private
+#      later would break the sync until a credential is added.
 #
-# repoURL is the real repository (https://github.com/Katran1990/pet-project.git);
-# all four occurrences below must stay byte-identical or the $values ref won't resolve.
+# The two sources deliberately point at different repositories: our Argo CD rejected a
+# multi-source app that referenced two revisions of the same repoURL, which is why the
+# environment values moved out of the `deploy` branch of this repo.
+# The sources are tied together by the ref name, not by the URL - the values source
+# declares `ref: values` and the chart source consumes it as
+# `$values/envs/<env>/values.yaml`. Keep that name and the `$values` prefix in sync.
+# Style: spell each repoURL the same way in the dev and the prod Application, so the
+# two obviously refer to the same pair of repositories.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -23,8 +33,8 @@ spec:
       helm:
         valueFiles:
           - $values/envs/dev/values.yaml
-    - repoURL: https://github.com/Katran1990/pet-project.git
-      targetRevision: deploy
+    - repoURL: https://github.com/Katran1990/pet-project-deploy.git
+      targetRevision: main
       ref: values
   syncPolicy:
     automated:
@@ -50,8 +60,8 @@ spec:
       helm:
         valueFiles:
           - $values/envs/prod/values.yaml
-    - repoURL: https://github.com/Katran1990/pet-project.git
-      targetRevision: deploy
+    - repoURL: https://github.com/Katran1990/pet-project-deploy.git
+      targetRevision: main
       ref: values
   syncPolicy:
     automated:

@@ -92,8 +92,19 @@ Postgres and are meant for local development only.
 - `infra/argocd/apps.yaml` — two Argo CD Applications (`pet-project-dev` ->
   namespace `dev` from branch `development`, `pet-project-prod` -> namespace
   `prod` from branch `main`); applied once by hand with
-  `kubectl apply -f infra/argocd/apps.yaml`.
-- Environment values live on the `deploy` branch (`envs/dev/values.yaml`,
-  `envs/prod/values.yaml`); `.github/workflows/update-deploy.yml` writes the
-  image tag there after a successful "Build images" run.
+  `kubectl apply -f infra/argocd/apps.yaml`. Each app has two sources: the
+  chart from this repo and the environment values from the deploy repo.
+- Environment values live in a separate repository,
+  `https://github.com/Katran1990/pet-project-deploy` (branch `main`, files
+  `envs/dev/values.yaml` and `envs/prod/values.yaml`). They were moved out of
+  the `deploy` branch of this repo because Argo CD rejected a multi-source
+  Application that referenced two revisions of the same repository.
+- `.github/workflows/update-deploy.yml` writes the image tag into that repo
+  after a successful "Build images" run, using the repository secret
+  `DEPLOY_REPO_TOKEN` (a token with write access to `pet-project-deploy`).
+- The `deploy` branch of this repository is superseded once this change
+  reaches `main` - `workflow_run` workflows always run the copy of the
+  workflow file from the default branch, so until then the old workflow
+  keeps writing to that branch. After that, nothing reads or writes it any
+  more; it is kept as-is for history.
 - Add `dev.pet.local` / `pet.local` to `/etc/hosts` for the local k3d cluster.
