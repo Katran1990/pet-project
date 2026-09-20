@@ -1,0 +1,71 @@
+# Argo CD Applications. Apply once by hand: kubectl apply -f infra/argocd/apps.yaml
+#
+# Each app has two sources:
+#   1. the Helm chart from this repo (branch development for dev, main for prod)
+#   2. environment values from the deploy repo
+#      (https://github.com/Katran1990/pet-project-deploy.git, branch main), which CI
+#      pushes to (see .github/workflows/update-deploy.yml). That repo is public, so
+#      Argo CD needs no repository credential (`argocd repo add`); making it private
+#      later would break the sync until a credential is added.
+#
+# The two sources deliberately point at different repositories: our Argo CD rejected a
+# multi-source app that referenced two revisions of the same repoURL, which is why the
+# environment values moved out of the `deploy` branch of this repo.
+# The sources are tied together by the ref name, not by the URL - the values source
+# declares `ref: values` and the chart source consumes it as
+# `$values/envs/<env>/values.yaml`. Keep that name and the `$values` prefix in sync.
+# Style: spell each repoURL the same way in the dev and the prod Application, so the
+# two obviously refer to the same pair of repositories.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pet-project-dev
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dev
+  sources:
+    - repoURL: https://github.com/Katran1990/pet-project.git
+      targetRevision: development
+      path: infra/helm/pet-project
+      helm:
+        valueFiles:
+          - $values/envs/dev/values.yaml
+    - repoURL: https://github.com/Katran1990/pet-project-deploy.git
+      targetRevision: main
+      ref: values
+  syncPolicy:
+    automated:
+      prune: true          # delete resources removed from git
+      selfHeal: true       # revert manual kubectl changes back to git state
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pet-project-prod
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  sources:
+    - repoURL: https://github.com/Katran1990/pet-project.git
+      targetRevision: main
+      path: infra/helm/pet-project
+      helm:
+        valueFiles:
+          - $values/envs/prod/values.yaml
+    - repoURL: https://github.com/Katran1990/pet-project-deploy.git
+      targetRevision: main
+      ref: values
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

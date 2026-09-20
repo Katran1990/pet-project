@@ -14,6 +14,7 @@ services:
       - frontend-node-modules:/workspace/frontend/node_modules
       - claude-config:/home/vscode/.claude
       - gradle-cache:/home/vscode/.gradle
+      - gh-config:/home/vscode/.config/gh
 
   # Database for development. Reachable from the dev container as postgres:5432
   postgres:
@@ -44,3 +45,4 @@ volumes:
   claude-config:
   gradle-cache:
   pgdata:
+  gh-config:

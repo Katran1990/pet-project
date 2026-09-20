@@ -1,0 +1,6 @@
+apiVersion: v2
+name: pet-project
+description: Backend (Spring Boot), frontend (nginx + Vite build) and Postgres
+type: application
+version: 0.1.0        # chart version, bump when templates change
+appVersion: "0.1.0"

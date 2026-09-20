@@ -13,3 +13,6 @@ dist/
 # secrets and personal settings
 .env
 .claude/settings.local.json
+
+# OS
+.DS_Store
