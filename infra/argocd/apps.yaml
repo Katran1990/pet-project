@@ -1,0 +1,61 @@
+# Argo CD Applications. Apply once by hand: kubectl apply -f infra/argocd/apps.yaml
+#
+# Each app has two sources:
+#   1. the Helm chart from a code branch (development for dev, main for prod)
+#   2. environment values from the `deploy` branch, which must accept pushes from CI (see .github/workflows/update-deploy.yml)
+#
+# repoURL is the real repository (https://github.com/Katran1990/pet-project.git);
+# all four occurrences below must stay byte-identical or the $values ref won't resolve.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pet-project-dev
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: dev
+  sources:
+    - repoURL: https://github.com/Katran1990/pet-project.git
+      targetRevision: development
+      path: infra/helm/pet-project
+      helm:
+        valueFiles:
+          - $values/envs/dev/values.yaml
+    - repoURL: https://github.com/Katran1990/pet-project.git
+      targetRevision: deploy
+      ref: values
+  syncPolicy:
+    automated:
+      prune: true          # delete resources removed from git
+      selfHeal: true       # revert manual kubectl changes back to git state
+    syncOptions:
+      - CreateNamespace=true
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pet-project-prod
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prod
+  sources:
+    - repoURL: https://github.com/Katran1990/pet-project.git
+      targetRevision: main
+      path: infra/helm/pet-project
+      helm:
+        valueFiles:
+          - $values/envs/prod/values.yaml
+    - repoURL: https://github.com/Katran1990/pet-project.git
+      targetRevision: deploy
+      ref: values
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
