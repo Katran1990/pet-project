@@ -24,6 +24,7 @@ USER 1001
 COPY --from=build /app/build/libs/*.jar app.jar
 
 # Runtime env vars (no defaults with credentials are baked into the image):
-#   DB_URL, DB_USER, DB_PASSWORD
+#   DB_URL, DB_USER, DB_PASSWORD, DB_STARTUP_WAIT_TIMEOUT (default 60s),
+#   DB_STARTUP_WAIT_INTERVAL (default 2s)
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]
