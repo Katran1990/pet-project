@@ -24,14 +24,10 @@ postgres:
   image: postgres:17
   storage: 1Gi
   db: app
-  user: app
-  # Dev credential only - the same throwaway app/app pair that backend's
-  # application.properties already defaults to. envs/prod/values.yaml in the
-  # deploy repo does NOT override it, so "prod" currently comes up with app/app.
-  # Replace with Sealed Secrets / External Secrets before prod is reachable
-  # from outside (follow-up card). Never put a real password into envs/* -
-  # update-deploy.yml prints those files with `cat`.
-  password: app
+  # Credentials are not values: they come from
+  # sealed-secrets/<namespace>/postgres-credentials.yaml (Sealed Secrets). Never put a
+  # password into this file or into envs/* in the deploy repo - update-deploy.yml
+  # prints those files with `cat`.
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits:   { memory: 384Mi }

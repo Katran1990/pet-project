@@ -59,6 +59,16 @@ jobs:
           # yq v4 (mikefarah) is preinstalled on ubuntu-latest runners
           FILE="envs/${ENV_NAME}/values.yaml"
           yq -i ".backend.tag = strenv(TAG) | .frontend.tag = strenv(TAG)" "$FILE"
+          # Credentials come from SealedSecrets in the chart, never from env values.
+          # Refuse to print a values file that carries a password-like key, structurally
+          # (any key in any document, however it is spelled/quoted/nested/styled). `ea`
+          # (eval-all) evaluates every YAML document in the file as one stream, so a
+          # multi-document file cannot hide a password key in one of its documents -
+          # plain `yq -e` does not reliably fail when only one document matches. A yq
+          # parse error also counts as "found" and fails closed, before `cat` below.
+          if ! yq ea -e '[.. | select(key != null) | select((key | type) == "!!str") | select(key | test("(?i)password"))] | length == 0' "$FILE" >/dev/null 2>&1; then
+            echo "::error::${FILE} contains a password key - remove it from the deploy repo"; exit 1
+          fi
           cat "$FILE"
 
       - name: Commit and push

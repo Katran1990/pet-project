@@ -1,13 +1,31 @@
 # Postgres inside the cluster. Fine for dev and for a learning prod;
 # a real production would use a managed database.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: postgres-credentials
-type: Opaque
-stringData:
-  user: {{ .Values.postgres.user | quote }}
-  password: {{ .Values.postgres.password | quote }}
+{{- /*
+Postgres credentials: a SealedSecret per namespace, committed as kubeseal output under
+sealed-secrets/<namespace>/postgres-credentials.yaml (strict scope). The Sealed Secrets
+controller decrypts it into the Secret "postgres-credentials" (keys: user, password).
+See README, "Postgres credentials (Sealed Secrets)".
+*/}}
+{{- $path := printf "sealed-secrets/%s/postgres-credentials.yaml" .Release.Namespace }}
+{{- $raw := .Files.Get $path }}
+{{- if not $raw }}
+{{- fail (printf "no sealed Postgres credentials for namespace %q: %s is missing (README, \"Postgres credentials\")" .Release.Namespace $path) }}
+{{- end }}
+{{- $ss := fromYaml $raw }}
+{{- if hasKey $ss "Error" }}{{ fail (printf "%s is not valid YAML: %s" $path $ss.Error) }}{{ end }}
+{{- if ne (default "" $ss.kind) "SealedSecret" }}{{ fail (printf "%s must be a SealedSecret" $path) }}{{ end }}
+{{- if ne (dig "metadata" "name" "" $ss) "postgres-credentials" }}{{ fail (printf "%s: metadata.name must be postgres-credentials" $path) }}{{ end }}
+{{- if ne (dig "metadata" "namespace" "" $ss) .Release.Namespace }}{{ fail (printf "%s: sealed for another namespace" $path) }}{{ end }}
+{{- $ann := (dig "metadata" "annotations" (dict) $ss) | default (dict) }}
+{{- if or (hasKey $ann "sealedsecrets.bitnami.com/cluster-wide") (hasKey $ann "sealedsecrets.bitnami.com/namespace-wide") }}{{ fail (printf "%s must use strict scope" $path) }}{{ end }}
+{{- if hasKey $ss "data" }}{{ fail (printf "%s: top-level data must not be set (plaintext-bearing field, only spec.encryptedData may carry values)" $path) }}{{ end }}
+{{- if hasKey $ss "stringData" }}{{ fail (printf "%s: top-level stringData must not be set (plaintext-bearing field, only spec.encryptedData may carry values)" $path) }}{{ end }}
+{{- $tmpl := (dig "spec" "template" (dict) $ss) | default (dict) }}
+{{- if hasKey $tmpl "data" }}{{ fail (printf "%s: spec.template.data must not be set (plaintext-bearing field, only spec.encryptedData may carry values)" $path) }}{{ end }}
+{{- range $k := list "user" "password" }}
+{{- if not (dig "spec" "encryptedData" $k "" $ss) }}{{ fail (printf "%s: spec.encryptedData.%s is missing" $path $k) }}{{ end }}
+{{- end }}
+{{ toYaml $ss }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet          # like a Deployment, but keeps a stable disk per pod
@@ -40,7 +58,7 @@ spec:
               value: /var/lib/postgresql/data/pgdata
           readinessProbe:
             exec:
-              command: ["pg_isready", "-U", {{ .Values.postgres.user | quote }}]
+              command: ["sh", "-c", 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
             periodSeconds: 5
           volumeMounts:
             - name: data
