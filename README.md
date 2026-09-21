@@ -69,7 +69,21 @@ Postgres and are meant for local development only.
 ## CI and Docker images
 
 - `.github/workflows/ci.yml` runs on every PR: backend `./gradlew build`
-  (compiles and runs tests), frontend lint and build.
+  (compiles and runs tests), frontend lint and build, `helm lint` and
+  `helm template` of `infra/helm/pet-project` against the `envs/dev` and
+  `envs/prod` values from `pet-project-deploy@main`, and actionlint over
+  `.github/workflows/`. Run the same checks locally with
+  `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color`
+  and `docker run --rm -v "$PWD:/apps" -w /apps alpine/helm:3.22.0 lint infra/helm/pet-project`.
+  The `helm template` check additionally needs the `envs/dev` and
+  `envs/prod` values files from `pet-project-deploy@main`; download them and
+  render locally with:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/Katran1990/pet-project-deploy/main/envs/dev/values.yaml -o /tmp/dev-values.yaml
+  docker run --rm -v "$PWD:/apps" -v "/tmp:/vals" -w /apps alpine/helm:3.22.0 \
+    template pet-project-dev infra/helm/pet-project -n dev -f /vals/dev-values.yaml > /dev/null
+  ```
 - `.github/workflows/build-images.yml` pushes
   `ghcr.io/<owner>/<repo>/backend:<tag>` and
   `ghcr.io/<owner>/<repo>/frontend:<tag>` on push to `development`/`main`,
