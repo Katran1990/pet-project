@@ -1,5 +1,5 @@
 # CI: runs on every pull request and on every push to development / main.
-# Two independent jobs (backend, frontend) run in parallel.
+# Four independent jobs (backend, frontend, the Helm chart check and actionlint) run in parallel.
 name: CI
 
 on:
@@ -70,3 +70,68 @@ jobs:
 
       - name: Type-check and build
         run: npm run build
+
+  helm:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # Environment values live in the deploy repo (see infra/argocd/apps.yaml), not here.
+      # Read-only checkout with the built-in token: the deploy repo is public, so no secret
+      # is needed, and DEPLOY_REPO_TOKEN (write access) is deliberately kept out of PR jobs.
+      # Works the same for PRs from forks and Dependabot. If the deploy repo ever becomes
+      # private, this step fails with "repository not found" instead of skipping the check.
+      - name: Check out environment values (pet-project-deploy)
+        uses: actions/checkout@v6
+        with:
+          repository: Katran1990/pet-project-deploy
+          ref: main
+          path: deploy-values
+          persist-credentials: false   # read-only: do not leave the token in .git/config
+          sparse-checkout: envs
+
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1, pinned by SHA (third-party action)
+        with:
+          version: v3.22.0              # pinned Helm 3.x; do not float to Helm 4
+
+      - name: Lint chart
+        run: helm lint infra/helm/pet-project
+
+      # Same lint with each environment's values: catches warnings that only appear with them.
+      - name: Lint chart with dev and prod values
+        run: |
+          for env in dev prod; do
+            helm lint infra/helm/pet-project -f "deploy-values/envs/${env}/values.yaml"
+          done
+
+      # Renders the chart exactly as Argo CD does (chart + envs/<env>/values.yaml).
+      # Output goes to /dev/null: postgres.yaml renders a Secret and must not end up in the log.
+      # Errors go to stderr and fail the step.
+      - name: Render chart with dev and prod values
+        run: |
+          for env in dev prod; do
+            echo "helm template with envs/${env}/values.yaml"
+            helm template "pet-project-${env}" infra/helm/pet-project \
+              --namespace "${env}" \
+              -f "deploy-values/envs/${env}/values.yaml" > /dev/null
+          done
+
+  actionlint:
+    name: Workflow lint (actionlint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # Checks every file in .github/workflows/ (actionlint's default when run from the repo root),
+      # including the shell in run: blocks via shellcheck, which is bundled in the official image.
+      - name: actionlint
+        uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+        with:
+          args: -color
