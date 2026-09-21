@@ -36,6 +36,12 @@ spec:
             httpGet: { path: /actuator/health, port: 8080 }
             initialDelaySeconds: 30
             periodSeconds: 10
+          # Disables the readiness/liveness probes until the app is up, so they cannot kill the
+          # pod while it is still waiting for Postgres (see DB_STARTUP_WAIT_TIMEOUT in README)
+          startupProbe:
+            httpGet: { path: /actuator/health, port: 8080 }
+            periodSeconds: 5
+            failureThreshold: 24   # 120s >= 60s DB wait + normal startup
           resources: {{- toYaml .Values.backend.resources | nindent 12 }}
 ---
 apiVersion: v1

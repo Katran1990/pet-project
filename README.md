@@ -52,11 +52,19 @@ The database connection is read from the environment; the defaults in
 `backend/src/main/resources/application.properties` point at the dev container
 Postgres and are meant for local development only.
 
-| Variable      | Default                                    |
-| ------------- | ------------------------------------------ |
-| `DB_URL`      | `jdbc:postgresql://postgres:5432/app`      |
-| `DB_USER`     | `app`                                      |
-| `DB_PASSWORD` | `app`                                      |
+| Variable                   | Default                                    |
+| -------------------------- | ------------------------------------------ |
+| `DB_URL`                   | `jdbc:postgresql://postgres:5432/app`      |
+| `DB_USER`                  | `app`                                      |
+| `DB_PASSWORD`              | `app`                                      |
+| `DB_STARTUP_WAIT_TIMEOUT`  | `60s`                                      |
+| `DB_STARTUP_WAIT_INTERVAL` | `2s`                                       |
+
+On startup the backend waits up to `DB_STARTUP_WAIT_TIMEOUT` for Postgres to
+accept connections, trying again every `DB_STARTUP_WAIT_INTERVAL`.
+Authentication or unknown-database errors fail immediately instead of
+waiting out the timeout. Setting `DB_STARTUP_WAIT_TIMEOUT=0` restores
+fail-fast (a single attempt).
 
 ## API
 
@@ -95,7 +103,8 @@ Postgres and are meant for local development only.
   docker build -t pet-frontend frontend
   ```
 
-- The backend image reads `DB_URL`, `DB_USER` and `DB_PASSWORD` at runtime.
+- The backend image reads `DB_URL`, `DB_USER`, `DB_PASSWORD`,
+  `DB_STARTUP_WAIT_TIMEOUT` and `DB_STARTUP_WAIT_INTERVAL` at runtime.
 - The frontend image proxies `/api` to a host named `backend:8080`, which
   must resolve when the container starts.
 
