@@ -16,6 +16,10 @@
 # `$values/envs/<env>/values.yaml`. Keep that name and the `$values` prefix in sync.
 # Style: spell each repoURL the same way in the dev and the prod Application, so the
 # two obviously refer to the same pair of repositories.
+#
+# Prerequisite: the Sealed Secrets controller must be installed in the cluster
+# (README, "Postgres credentials (Sealed Secrets)"); without its CRD the sync fails
+# and nothing is applied.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

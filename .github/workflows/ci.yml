@@ -98,19 +98,24 @@ jobs:
         with:
           version: v3.22.0              # pinned Helm 3.x; do not float to Helm 4
 
+      # --namespace dev: the chart has no sealed Postgres credentials for "default",
+      # so an unnamespaced lint would just log the resulting fail() as INFO noise.
       - name: Lint chart
-        run: helm lint infra/helm/pet-project
+        run: helm lint infra/helm/pet-project --namespace dev
 
       # Same lint with each environment's values: catches warnings that only appear with them.
       - name: Lint chart with dev and prod values
         run: |
           for env in dev prod; do
-            helm lint infra/helm/pet-project -f "deploy-values/envs/${env}/values.yaml"
+            helm lint infra/helm/pet-project --namespace "${env}" -f "deploy-values/envs/${env}/values.yaml"
           done
 
       # Renders the chart exactly as Argo CD does (chart + envs/<env>/values.yaml).
-      # Output goes to /dev/null: postgres.yaml renders a Secret and must not end up in the log.
-      # Errors go to stderr and fail the step.
+      # Output goes to /dev/null to keep the log short: postgres.yaml now renders a
+      # SealedSecret (ciphertext only, safe either way). `helm template` - not `helm
+      # lint` - is what actually enforces the sealed-file validation in postgres.yaml
+      # (its fail() checks): helm lint only logs them as INFO. Errors go to stderr and
+      # fail the step.
       - name: Render chart with dev and prod values
         run: |
           for env in dev prod; do
