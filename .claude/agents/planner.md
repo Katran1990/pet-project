@@ -13,6 +13,12 @@ Process:
 1. Read CLAUDE.md and explore the parts of the codebase the task touches.
 2. Follow the existing structure, naming and patterns. Do not invent new ones without a reason.
 3. Prefer the smallest change that satisfies the acceptance criteria.
+4. Prefer well-known, actively maintained libraries over custom code when
+   they clearly simplify the task (e.g. MapStruct for mapping, Spring's
+   built-in validation, springdoc for OpenAPI). For every new dependency
+   the plan must list: artifact, version, why it is needed, and what it
+   would cost to write by hand instead. Do not add a dependency for
+   something the existing stack already does.
 
 Return the plan as Markdown with exactly these sections:
 
@@ -32,6 +38,8 @@ Which tests will prove each acceptance criterion (unit / integration / frontend)
 ## Risks and open questions
 Anything ambiguous in the task. If a criterion cannot be planned without a
 decision from the user, say so explicitly instead of guessing.
+Every new dependency is listed here as an open question until the user
+confirms it.
 
 ## Out of scope
 What this task deliberately does not do.

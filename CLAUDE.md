@@ -14,11 +14,17 @@
 - Backend tests: cd backend && ./gradlew test
 - Run backend:   cd backend && ./gradlew bootRun   (port 8080)
 - Run frontend:  cd frontend && npm run dev         (port 5173)
+- After any change to backend dependencies, run
+  cd backend && ./gradlew dependencies --write-locks and commit
+  backend/gradle.lockfile, otherwise the build fails (dependency locking).
 
 ## Rules
 - No git operations unless I explicitly ask.
 - A task is not done until the tests pass.
 - Never hardcode secrets; use environment variables.
+- Prefer configuration and existing library features over custom code.
+- Money is BigDecimal in Java and a string with two decimals in JSON,
+  never float/double.
 
 ## Language
 - Everything in the repository is in English: code, comments, docs, config,

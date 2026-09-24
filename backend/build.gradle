@@ -18,6 +18,15 @@ repositories {
 	mavenCentral()
 }
 
+dependencyLocking {
+	lockAllConfigurations()
+}
+
+// TODO: remove once a Spring Boot 4.1.x release manages Tomcat 11.0.25 or newer.
+// Overrides the Tomcat version pulled in by the Spring Boot BOM (11.0.24) to fix
+// CVE-2026-65182, CVE-2026-65905 and CVE-2026-68525 (all CRITICAL, fixed in 11.0.25).
+ext['tomcat.version'] = '11.0.26'
+
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
