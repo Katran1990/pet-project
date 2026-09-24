@@ -14,6 +14,9 @@
 - Backend tests: cd backend && ./gradlew test
 - Run backend:   cd backend && ./gradlew bootRun   (port 8080)
 - Run frontend:  cd frontend && npm run dev         (port 5173)
+- After any change to backend dependencies, run
+  cd backend && ./gradlew dependencies --write-locks and commit
+  backend/gradle.lockfile, otherwise the build fails (dependency locking).
 
 ## Rules
 - No git operations unless I explicitly ask.

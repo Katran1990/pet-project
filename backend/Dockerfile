@@ -4,7 +4,7 @@ WORKDIR /app
 
 # Copy build files first so dependency download is cached
 # until build.gradle actually changes
-COPY gradlew build.gradle settings.gradle ./
+COPY gradlew build.gradle settings.gradle gradle.lockfile ./
 RUN chmod +x gradlew
 COPY gradle ./gradle
 RUN ./gradlew dependencies --no-daemon > /dev/null 2>&1 || true

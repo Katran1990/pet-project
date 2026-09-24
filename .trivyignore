@@ -1,0 +1,25 @@
+# Trivy suppression file (https://trivy.dev/), read from the repository root by
+# every Trivy step in .github/workflows/ci.yml and .github/workflows/build-images.yml,
+# and applicable to all four scans (fs report, fs gate, image report, image gate).
+#
+# Convention: every entry needs a comment block above it, in this form:
+#
+#   # CVE-2099-00000
+#   #   package:  <ecosystem>/<name>@<version> (backend lockfile | frontend lockfile | backend image | frontend image)
+#   #   reason:   <why it is not exploitable here / why it cannot be fixed yet>
+#   #   added:    YYYY-MM-DD by <who>
+#   CVE-2099-00000 exp:YYYY-MM-DD
+#
+# `exp:YYYY-MM-DD` is Trivy's native expiry syntax: after that date the entry stops
+# applying, the finding comes back and fails CI again, which forces a review.
+# Every entry must have an `exp:` date, at most 90 days ahead of the day it is added.
+
+# CVE-2026-93990
+#   package:  alpine/libexpat@2.8.4-r0 (frontend image)
+#   reason:   base image package (nginx:1.30-alpine, Alpine 3.24). The fix
+#             (libexpat 2.8.5-r0) is already published in the Alpine 3.24
+#             package repository, but no nginx:1.30-alpine (or 1.30.x/1.31.x)
+#             tag on Docker Hub has been rebuilt against it yet as of this
+#             writing. Waiting for an upstream nginx:1.30-alpine rebuild.
+#   added:    2026-09-24 by Borys Bobrovych
+CVE-2026-93990 exp:2026-10-24

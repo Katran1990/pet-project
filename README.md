@@ -83,7 +83,8 @@ Secrets, and there is no fallback.
 - `.github/workflows/ci.yml` runs on every PR: backend `./gradlew build`
   (compiles and runs tests), frontend lint and build, `helm lint` and
   `helm template` of `infra/helm/pet-project` against the `envs/dev` and
-  `envs/prod` values from `pet-project-deploy@main`, and actionlint over
+  `envs/prod` values from `pet-project-deploy@main`, a Trivy dependency scan
+  (see "Dependency vulnerability scanning (Trivy)" below), and actionlint over
   `.github/workflows/`. Run the same checks locally with
   `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color`
   and `docker run --rm -v "$PWD:/apps" -w /apps alpine/helm:3.22.0 lint infra/helm/pet-project --namespace dev`.
@@ -96,10 +97,13 @@ Secrets, and there is no fallback.
   docker run --rm -v "$PWD:/apps" -v "/tmp:/vals" -w /apps alpine/helm:3.22.0 \
     template pet-project-dev infra/helm/pet-project -n dev -f /vals/dev-values.yaml > /dev/null
   ```
-- `.github/workflows/build-images.yml` pushes
+- `.github/workflows/build-images.yml` builds, scans (Trivy) and pushes
   `ghcr.io/<owner>/<repo>/backend:<tag>` and
   `ghcr.io/<owner>/<repo>/frontend:<tag>` on push to `development`/`main`,
-  tagged with the branch name and the commit SHA.
+  tagged with the branch name and the commit SHA. Each image is scanned
+  before it is pushed; a failed scan blocks the push of that image. The two
+  images build in parallel with fail-fast, so one may already have been
+  pushed by the time the other's scan fails.
 - Build the images locally:
 
   ```bash
@@ -111,6 +115,54 @@ Secrets, and there is no fallback.
   `DB_STARTUP_WAIT_TIMEOUT` and `DB_STARTUP_WAIT_INTERVAL` at runtime.
 - The frontend image proxies `/api` to a host named `backend:8080`, which
   must resolve when the container starts.
+
+### Dependency vulnerability scanning (Trivy)
+
+- **What runs where:** a filesystem scan of `backend/gradle.lockfile` and
+  `frontend/package-lock.json` runs in `ci.yml` on every PR and on every push
+  to `development`/`main`. An image scan of the built `backend` and
+  `frontend` images runs in `build-images.yml` before they are pushed.
+- **What fails:** fixed HIGH and CRITICAL findings fail the job. MEDIUM, LOW
+  and UNKNOWN are only reported. Unfixed vulnerabilities (no patched version
+  available yet) are ignored by default (`ignore-unfixed`), so they appear
+  neither in the report nor in the gate. npm devDependencies are included in
+  the scan (`TRIVY_INCLUDE_DEV_DEPS`); Gradle test dependencies are scanned
+  too, because `gradle.lockfile` does not separate configurations.
+- **How to read findings:**
+  - The job summary of the run has a table with package, installed version,
+    fixed version and CVE.
+  - The failing gate step's log lists the blocking findings.
+  - Security tab → Code scanning, filtered by tool "Trivy" and category
+    `trivy-fs` / `trivy-image-backend` / `trivy-image-frontend`.
+  - Fork and Dependabot PRs only get the job summary; they cannot upload
+    SARIF.
+- **How to fix:** bump the dependency, or rebuild on a newer base image. For
+  a Gradle dependency change, run `cd backend && ./gradlew dependencies
+  --write-locks` and commit `backend/gradle.lockfile`.
+- **How to suppress:** add the CVE to `/.trivyignore`, following the comment
+  convention at the top of that file (package, reason, added-by/date), with
+  a mandatory `exp:YYYY-MM-DD` at most 90 days ahead. The finding comes back
+  and fails CI again once that date passes.
+- **Run locally**, with the pinned Trivy version used by CI:
+
+  ```bash
+  docker run --rm -v "$PWD:/repo" -w /repo -e TRIVY_INCLUDE_DEV_DEPS=true \
+    aquasec/trivy:0.70.0@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e \
+    fs --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 .
+
+  docker build -t pet-backend backend && docker build -t pet-frontend frontend
+  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/repo" -w /repo \
+    -e TRIVY_IMAGE_SRC=docker \
+    aquasec/trivy:0.70.0@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e \
+    image --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 pet-backend
+  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/repo" -w /repo \
+    -e TRIVY_IMAGE_SRC=docker \
+    aquasec/trivy:0.70.0@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e \
+    image --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 pet-frontend
+  ```
+
+  The repo is mounted at `/repo` (Trivy's working directory) so `.trivyignore` at the
+  repository root is picked up the same way it is in CI.
 
 ## Deploy (Helm + Argo CD)
 

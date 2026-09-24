@@ -1,5 +1,6 @@
 # CI: runs on every pull request and on every push to development / main.
-# Four independent jobs (backend, frontend, the Helm chart check and actionlint) run in parallel.
+# Five independent jobs (backend, frontend, the Helm chart check, actionlint and the
+# Trivy dependency scan) run in parallel.
 name: CI
 
 on:
@@ -124,6 +125,102 @@ jobs:
               --namespace "${env}" \
               -f "deploy-values/envs/${env}/values.yaml" > /dev/null
           done
+
+  dependency-scan:
+    name: Dependencies (Trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Job-level permissions replace the workflow-level block, which is why
+    # contents: read is listed again here, alongside security-events: write
+    # (only this job uploads SARIF).
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # No JDK or Node setup: Trivy reads backend/gradle.lockfile and
+      # frontend/package-lock.json directly.
+
+      # Report run 1/2 (SARIF, all severities, never fails): feeds the Security tab.
+      - name: Scan dependencies (SARIF report)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0, pinned by SHA (third-party action)
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          format: sarif
+          output: trivy-fs.sarif
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: "0"
+          version: v0.70.0
+        env:
+          TRIVY_INCLUDE_DEV_DEPS: true
+
+      # Report run 2/2 (table, all severities, never fails): feeds the job summary.
+      # Reuses the DB and the installed Trivy binary from the previous step.
+      - name: Scan dependencies (table report)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0, pinned by SHA (third-party action)
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          format: table
+          output: trivy-fs.txt
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: "0"
+          version: v0.70.0
+          skip-setup-trivy: true
+          # Disable actions/cache restore/save here: it is not gated by skip-setup-trivy,
+          # so it would restore an older cached DB over the fresh one from the previous
+          # step and re-save it, pinning the gate to a stale DB forever.
+          cache: "false"
+        env:
+          TRIVY_INCLUDE_DEV_DEPS: true
+          TRIVY_SKIP_DB_UPDATE: true
+
+      # Visible on every PR, including forks and Dependabot, where SARIF upload is not allowed.
+      - name: Add findings to job summary
+        run: |
+          {
+            echo "## Dependency scan (Trivy)"
+            echo '```'
+            cat trivy-fs.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Fork and Dependabot PRs get a read-only token, so the upload would fail there.
+      # continue-on-error: the gate below still fails the job on its own if this upload fails.
+      - name: Upload SARIF to the Security tab
+        if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
+        uses: github/codeql-action/upload-sarif@v4
+        continue-on-error: true
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+      # Gate: fails the job on HIGH/CRITICAL fixed findings and prints them in the log.
+      - name: Fail on HIGH/CRITICAL
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0, pinned by SHA (third-party action)
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+          exit-code: "1"
+          version: v0.70.0
+          skip-setup-trivy: true
+          cache: "false"
+        env:
+          TRIVY_INCLUDE_DEV_DEPS: true
+          TRIVY_SKIP_DB_UPDATE: true
 
   actionlint:
     name: Workflow lint (actionlint)
