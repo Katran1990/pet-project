@@ -259,8 +259,9 @@ fail to start.
 ### Rotate the credential
 
 `POSTGRES_PASSWORD` is only read when the database is first initialised.
-After that, restarting Postgres never changes the password; only
-`\password` does.
+After that, restarting Postgres never changes the password; only changing
+it inside Postgres does (`\password`, or `ALTER USER` as in "Change the
+password of an already initialised database").
 
 Every merge also triggers a new backend rollout. Any push to
 `development`/`main` runs "Build images", then "Update deploy manifests"
@@ -340,6 +341,70 @@ Follow the same order as Rotate, with these differences:
   not managed", delete the old Secret by hand and restart the controller:
   `kubectl -n <env> delete secret postgres-credentials`, then `kubectl -n
   kube-system rollout restart deployment/sealed-secrets-controller`.
+
+### Change the password of an already initialised database
+
+Postgres stores the password of user `app` on its data volume (the PVC
+`data-postgres-0` of `statefulset/postgres`) when the database is first
+initialised, and never reads `POSTGRES_PASSWORD` again after that. A change
+of the sealed password therefore only changes the Secret
+`postgres-credentials`: the backend picks up the new value, the database
+keeps the old one, and the backend fails with `password authentication
+failed for user "app"`. Restarting or recreating the `postgres-0` pod does
+not help, because the volume is kept.
+
+This is the non-interactive equivalent of Rotate steps 2 and 3; do not run
+both `\password` and `ALTER USER` for the same change.
+
+Do the step below once per namespace, every time the sealed password for
+that namespace changes:
+
+- on every rotation (see "Rotate the credential");
+- on the first release of Sealed Secrets to a namespace that already has a
+  database, including the first release to `prod` (see "First switch from
+  the old `app/app`").
+
+A new namespace, or a dev database whose volume was reset, is initialised
+with the sealed password and needs nothing.
+
+Run it only after the SealedSecret in that namespace is `Synced` and the
+Secret fingerprint has changed (Rotate steps 1-2); in `prod` that means
+after the `main` merge has synced. Before that, the Secret still holds the
+old password or does not exist yet, and the commands would set the wrong
+one.
+
+Replace `<ns>` with the namespace (`dev` or `prod`). Run the lines one at
+a time and check the output of each before running the next:
+
+```bash
+NEWPASS=$(kubectl -n <ns> get secret postgres-credentials -o jsonpath='{.data.password}' | base64 -d)
+[ -n "$NEWPASS" ] || echo "NEWPASS is empty - stop"
+kubectl -n <ns> exec statefulset/postgres -- psql -U app -d app -c "ALTER USER app PASSWORD '$NEWPASS';"
+kubectl -n <ns> rollout restart deployment/backend
+```
+
+- The first line reads the new password from the Secret.
+- The second line (the guard) only prints a warning if `NEWPASS` is
+  empty; it does not stop the next lines from running by itself. Check
+  its output before running the third line: if `NEWPASS` is empty, stop,
+  because `ALTER USER ... PASSWORD ''` would clear the password instead
+  of setting it, and would still print `ALTER ROLE`, so that output alone
+  does not prove success.
+- The third line runs `psql` over the local socket inside the Postgres
+  pod, which needs no password, and changes the password stored on the
+  volume. It must print `ALTER ROLE`.
+- The fourth line restarts the backend so that every pod reconnects
+  with the new password (Rotate step 3 explains why this is always
+  needed). Follow it with `kubectl -n <ns> rollout status
+  deployment/backend` and verify as in Rotate step 4.
+- Then run `unset NEWPASS`.
+
+Unlike `\password app`, running the commands above exposes the password on
+the `kubectl` and `psql` command lines, so it is visible in the process
+list of your machine and of the pod while the command runs. Use `\password
+app` (Rotate step 2) where that matters. The quoting in the SQL statement
+is safe for the hex passwords produced by "Seal credentials"; a password
+containing `'` would break it.
 
 ### Controller key lost / cluster recreated
 
