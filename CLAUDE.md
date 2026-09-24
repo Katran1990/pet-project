@@ -19,6 +19,9 @@
 - No git operations unless I explicitly ask.
 - A task is not done until the tests pass.
 - Never hardcode secrets; use environment variables.
+- Prefer configuration and existing library features over custom code.
+- Money is BigDecimal in Java and a string with two decimals in JSON,
+  never float/double.
 
 ## Language
 - Everything in the repository is in English: code, comments, docs, config,
