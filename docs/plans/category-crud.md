@@ -35,6 +35,11 @@ Made by the user and recorded here:
 10. Second plan-review suggestions are accepted: test 2 is self-contained, the validation override delegates to `super`, OSIV and `DuplicateKeyException` notes, and a `DELETE /api/categories` 405 test.
 11. **PATCH semantics for optional strings (decided after test 13 failed).** Jackson 3.1.5 deserializes an absent `Optional` record component as `Optional.empty()`, not Java `null`, so absent and explicit `null` could not be told apart and every PATCH without `icon` wiped the icon. New rule, also added to `CLAUDE.md`: in PATCH requests, an omitted or `null` optional string field means "leave unchanged", an empty string means "clear". `icon` in `UpdateCategoryRequest` becomes a plain `String`.
 12. **Empty optional strings are normalised to `null` in POST and PATCH (after code review).** POST `{"icon": ""}` stores `null` (it used to store `""`), matching PATCH. The CLAUDE.md PATCH rule is extended accordingly. `patchRejectsBlankOrTooLongName` also asserts `$.errors.length() == 1` and a non-blank `$.errors[0].message`, like `rejectsInvalidCreate`.
+13. **Error mapping moves out of the controller (PR review, behaviour and tests unchanged).** Supersedes the `saveOrConflict` / `ResponseStatusException` notes in section 5:
+    - The controller calls `categories.saveAndFlush(...)` directly; `saveOrConflict` and `isNameUniqueViolation` are removed from it.
+    - `ApiExceptionHandler` gets one `@ExceptionHandler(DataIntegrityViolationException.class)`. It walks the cause chain for Hibernate's `ConstraintViolationException`, looks up the constraint name (case-insensitive) in a map `constraint name -> detail` (`uq_category_name_lower -> "Category name already exists"`) and returns a 409 Problem Detail with that detail. If the constraint is unknown or has no name, it delegates to the catch-all `handleUnexpected(ex)` and returns its generic 500 Problem Detail (still no exception message in the body). A plain rethrow was not used: in Spring MVC 7 an exception thrown from an `@ExceptionHandler` is not passed to other handlers of the same advice and would escape as a non-Problem-Details error.
+    - New `dev.katran.pet.web.NotFoundException(String entity, Object id)` (a `RuntimeException`) and an `@ExceptionHandler` for it in `ApiExceptionHandler`: 404 Problem Detail, `detail = entity + " not found"` (e.g. "Category not found"), plus an `id` property. The controller throws `new NotFoundException("Category", id)` in GET by id and PATCH instead of `ResponseStatusException`.
+    - Known trade-off (accepted): the `web` package knows constraint names of feature packages.
 
 ## Changes
 
@@ -126,15 +131,15 @@ Success JSON:
 ```
 
 Implementation notes:
-- **POST:** `saveOrConflict(new Category(req.name(), req.icon()))`, then `ResponseEntity.created(location).body(CategoryResponse.from(saved))`. `Location` is built as in `GreetingController`.
+- **POST:** `saveOrConflict(new Category(req.name(), req.icon()))` (superseded by decision 13: `saveAndFlush` directly), then `ResponseEntity.created(location).body(CategoryResponse.from(saved))`. `Location` is built as in `GreetingController`.
 - **GET list:** `@RequestParam(defaultValue = "false") boolean includeArchived`, then `findAllByOrderByIdAsc()` or `findAllByArchivedFalseOrderByIdAsc()`, mapped with `CategoryResponse::from`. A non-boolean value raises `MethodArgumentTypeMismatchException`, which the handler in section 6 renders as a 400 Problem Detail.
-- **GET by id:** `@GetMapping("/{id}")`, `findById(id).map(CategoryResponse::from).orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Category not found"))`.
+- **GET by id:** `@GetMapping("/{id}")`, `findById(id).map(CategoryResponse::from).orElseThrow(() -> new NotFoundException("Category", id))` (decision 13; originally `ResponseStatusException(NOT_FOUND, ...)`).
 - **PATCH:**
   1. `findById`, or throw 404 as above.
   2. Apply the non-null fields: `name` (already stripped); `icon` when non-null (`""` → `setIcon(null)`, otherwise `setIcon(icon)`); `archived`.
-  3. Call `saveOrConflict(category)`.
+  3. Call `saveOrConflict(category)` (superseded by decision 13: `saveAndFlush` directly).
   4. Renaming a category to a different case of its own name (for example `food` to `Food`) is allowed, because the index only conflicts with *other* rows.
-- **409, enforced in the DB and safe under races:**
+- **409, enforced in the DB and safe under races** (superseded by decision 13: the mapping below now lives in `ApiExceptionHandler`, and the controller calls `saveAndFlush` directly):
   ```java
   private Category saveOrConflict(Category category) {
       try {
@@ -155,6 +160,8 @@ Implementation notes:
 - No `@DeleteMapping`.
 
 ### 6. New file: `backend/src/main/java/dev/katran/pet/web/ApiExceptionHandler.java`
+> Decision 13 adds two handlers not shown in the listing below: `DataIntegrityViolationException` (constraint name → 409, otherwise the catch-all 500) and `NotFoundException` (404 with an `id` property). They live in this class together with `NotFoundException.java`.
+
 This is a new package `dev.katran.pet.web` for cross-cutting web concerns. Its sole content is this handler, which does not belong to any feature package.
 
 ```java
