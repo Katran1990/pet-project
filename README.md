@@ -76,7 +76,13 @@ Secrets, and there is no fallback.
 | ------ | --------------- | ------------------------------- |
 | `GET`  | `/api/greeting` | Returns the stored greeting     |
 | `POST` | `/api/greetings` | Creates a greeting ({"message": "..."}, 1-200 chars) |
+| `POST` | `/api/categories` | Creates a category ({"name": "...", "icon": "..."}); name is stripped, empty icon stored as null; 409 on duplicate name, case-insensitive |
+| `GET`  | `/api/categories` | Lists active categories; ?includeArchived=true includes archived ones |
+| `GET`  | `/api/categories/{id}` | Returns one category (archived ones too); 404 if unknown |
+| `PATCH` | `/api/categories/{id}` | Updates name, icon and/or archived; omitted or null fields are unchanged, "icon": "" clears the icon |
 | `GET`  | `/actuator/health` | Application health           |
+
+Errors are returned as RFC 9457 Problem Details (`application/problem+json`) with `type`, `title`, `status`, `detail` and `instance`. Validation errors (400) additionally contain `errors: [{"field": "...", "message": "..."}]`.
 
 ## CI and Docker images
 

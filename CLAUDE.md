@@ -25,6 +25,12 @@
 - Prefer configuration and existing library features over custom code.
 - Money is BigDecimal in Java and a string with two decimals in JSON,
   never float/double.
+- Table names are singular.
+- API errors are RFC 9457 Problem Details (application/problem+json);
+  validation errors add `errors: [{field, message}]`.
+- An empty string in an optional string field is normalised to null
+  in POST and PATCH. In PATCH, an omitted or null optional string
+  field means "leave unchanged", an empty string means "clear".
 
 ## Language
 - Everything in the repository is in English: code, comments, docs, config,
