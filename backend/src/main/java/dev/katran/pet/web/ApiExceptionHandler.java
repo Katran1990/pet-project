@@ -27,7 +27,8 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 	// Constraint name -> Problem Detail "detail" for known unique-constraint violations.
 	// Known trade-off: this web-layer class knows constraint names of feature packages.
 	private static final Map<String, String> CONSTRAINT_CONFLICT_DETAILS = Map.of(
-			"uq_category_name_lower", "Category name already exists");
+			"uq_category_name_lower", "Category name already exists",
+			"uq_budget_limit_category_month", "Budget limit for this category and month already exists");
 
 	@Override
 	protected ResponseEntity<Object> handleMethodArgumentNotValid(

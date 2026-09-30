@@ -91,6 +91,9 @@ by default.
 | `GET` | `/api/expenses/{id}` | Returns one expense with its category embedded as {id, name, icon}; 404 if unknown |
 | `PUT` | `/api/expenses/{id}` | Replaces amount, categoryId, spentOn and note (an omitted note clears it); 409 when switching to an archived category |
 | `DELETE` | `/api/expenses/{id}` | Deletes an expense; 204, or 404 if unknown |
+| `PUT` | `/api/budget-limits` | Sets the limit of a category for a month ({"categoryId": 1, "month": "2026-07", "amount": "1500.00"}); creates or updates (upsert) and always returns 200 with the stored limit; amount > 0 with at most two decimals; 400 on malformed month or unknown category, 409 on archived category |
+| `GET` | `/api/budget-limits?month=YYYY-MM` | Lists the limits of a month (month is required) with the category embedded as {id, name, icon}, ordered by category id |
+| `DELETE` | `/api/budget-limits/{id}` | Deletes a limit; 204, or 404 if unknown |
 | `GET`  | `/actuator/health` | Application health           |
 
 Errors are returned as RFC 9457 Problem Details (`application/problem+json`) with `type`, `title`, `status`, `detail` and `instance`. Validation errors (400) additionally contain `errors: [{"field": "...", "message": "..."}]`.
