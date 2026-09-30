@@ -34,7 +34,7 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 			MethodArgumentNotValidException ex, HttpHeaders headers,
 			HttpStatusCode status, WebRequest request) {
 		List<InvalidField> errors = ex.getBindingResult().getFieldErrors().stream()
-				.map(e -> new InvalidField(e.getField(), e.getDefaultMessage()))
+				.map(e -> new InvalidField(e.getField(), e.isBindingFailure() ? "invalid value" : e.getDefaultMessage()))
 				.sorted(Comparator.comparing(InvalidField::field).thenComparing(InvalidField::message))
 				.toList();
 		ex.getBody().setProperty("errors", errors);

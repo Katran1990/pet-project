@@ -73,7 +73,8 @@ Secrets, and there is no fallback.
 
 `APP_TIME_ZONE` is the IANA zone in which "today" is evaluated (an expense's
 `spentOn` must not be after today in this zone); an invalid zone fails
-startup.
+startup. It also defines the "current month" that `GET /api/expenses` lists
+by default.
 
 ## API
 
@@ -86,6 +87,7 @@ startup.
 | `GET`  | `/api/categories/{id}` | Returns one category (archived ones too); 404 if unknown |
 | `PATCH` | `/api/categories/{id}` | Updates name, icon and/or archived; omitted or null fields are unchanged, "icon": "" clears the icon |
 | `POST` | `/api/expenses` | Creates an expense ({"amount": "200.00", "categoryId": 1, "spentOn": "2026-06-16", "note": "..."}); amount > 0 with at most two decimals, spentOn not after today (APP_TIME_ZONE); 400 on unknown category, 409 on archived category |
+| `GET` | `/api/expenses` | Lists expenses: ?from=&to= (ISO dates, inclusive; default: current month in APP_TIME_ZONE), ?categoryIds=1,4,7 (empty = all; unknown id → 400), ?page= (0-based) and ?size= (1-200, default 50); sorted by spentOn desc, createdAt desc; returns {items, page, size, totalItems, totalAmount} with totalAmount summed over all matching rows |
 | `GET` | `/api/expenses/{id}` | Returns one expense with its category embedded as {id, name, icon}; 404 if unknown |
 | `PUT` | `/api/expenses/{id}` | Replaces amount, categoryId, spentOn and note (an omitted note clears it); 409 when switching to an archived category |
 | `DELETE` | `/api/expenses/{id}` | Deletes an expense; 204, or 404 if unknown |
