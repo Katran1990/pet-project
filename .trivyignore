@@ -23,3 +23,16 @@
 #             writing. Waiting for an upstream nginx:1.30-alpine rebuild.
 #   added:    2026-09-24 by Borys Bobrovych
 CVE-2026-93990 exp:2026-10-24
+
+# CVE-2026-84782
+#   package:  ubuntu/libssl3t64@3.5.5-1ubuntu3.5, ubuntu/openssl@3.5.5-1ubuntu3.5,
+#             ubuntu/openssl-provider-legacy@3.5.5-1ubuntu3.5 (backend image)
+#   reason:   base image packages (eclipse-temurin:25-jre, Ubuntu 26.04). Not
+#             exploitable here: the issue is in OpenSSL's DTLS handshake, while
+#             the backend does TLS through the JDK's own JSSE, has no OpenSSL-
+#             backed TLS library (no tcnative/conscrypt) and does not use DTLS.
+#             The fix (3.5.5-1ubuntu3.6) is already published for Ubuntu 26.04,
+#             but the latest eclipse-temurin:25-jre tag (built 2026-09-25) still
+#             ships 3.5.5-1ubuntu3.5. Waiting for an upstream rebuild.
+#   added:    2026-09-30 by Borys Bobrovych
+CVE-2026-84782 exp:2026-10-30
