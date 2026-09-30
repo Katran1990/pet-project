@@ -94,11 +94,12 @@ by default.
 | `PUT` | `/api/budget-limits` | Sets the limit of a category for a month ({"categoryId": 1, "month": "2026-07", "amount": "1500.00"}); creates or updates (upsert) and always returns 200 with the stored limit; amount > 0 with at most two decimals; 400 on malformed month or unknown category, 409 on archived category |
 | `GET` | `/api/budget-limits?month=YYYY-MM` | Lists the limits of a month (month is required) with the category embedded as {id, name, icon}, ordered by category id |
 | `DELETE` | `/api/budget-limits/{id}` | Deletes a limit; 204, or 404 if unknown |
+| `GET` | `/api/reports/by-category?month=YYYY-MM` | Monthly report (month is required): {month, totalAmount, rows}; one row per category with expenses and/or a limit in that month: {category {id, name, icon}, amount, share (percent of totalAmount, one decimal, "0.0" when the total is zero), limit (null if none), remaining (limit minus amount, null if no limit, negative when exceeded)}; sorted by amount desc, then category id; archived categories included |
 | `GET`  | `/actuator/health` | Application health           |
 
 Errors are returned as RFC 9457 Problem Details (`application/problem+json`) with `type`, `title`, `status`, `detail` and `instance`. Validation errors (400) additionally contain `errors: [{"field": "...", "message": "..."}]`.
 
-Money amounts are JSON strings with two decimals (`"200.00"`). `currency` is always `PLN` for now and is not accepted in requests.
+Money amounts are JSON strings with two decimals (`"200.00"`). `currency` is always `PLN` for now and is not accepted in requests. Percentages (`share`) are JSON strings with one decimal (`"64.8"`).
 
 ## CI and Docker images
 
