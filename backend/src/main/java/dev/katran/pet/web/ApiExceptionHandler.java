@@ -74,6 +74,18 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
 		return problem;
 	}
 
+	@ExceptionHandler(InvalidFieldException.class)
+	ProblemDetail handleInvalidField(InvalidFieldException ex) {
+		ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Invalid request content.");
+		problem.setProperty("errors", List.of(new InvalidField(ex.getField(), ex.getMessage())));
+		return problem;
+	}
+
+	@ExceptionHandler(ConflictException.class)
+	ProblemDetail handleConflict(ConflictException ex) {
+		return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+	}
+
 	// Catch-all: anything not handled above becomes a generic 500 Problem Detail.
 	@ExceptionHandler(Exception.class)
 	ProblemDetail handleUnexpected(Exception ex) {

@@ -48,7 +48,7 @@ cd backend && ./gradlew test
 
 ## Configuration
 
-The database connection is read from the environment; the defaults in
+Configuration is read from the environment; the defaults in
 `backend/src/main/resources/application.properties` point at the dev container
 Postgres and are meant for local development only.
 
@@ -59,6 +59,7 @@ Postgres and are meant for local development only.
 | `DB_PASSWORD`              | `app`                                      |
 | `DB_STARTUP_WAIT_TIMEOUT`  | `60s`                                      |
 | `DB_STARTUP_WAIT_INTERVAL` | `2s`                                       |
+| `APP_TIME_ZONE`            | `Europe/Warsaw`                            |
 
 On startup the backend waits up to `DB_STARTUP_WAIT_TIMEOUT` for Postgres to
 accept connections, trying again every `DB_STARTUP_WAIT_INTERVAL`.
@@ -70,6 +71,10 @@ The `DB_USER`/`DB_PASSWORD` defaults apply only to local runs. In Kubernetes,
 they always come from the Secret `postgres-credentials` created by Sealed
 Secrets, and there is no fallback.
 
+`APP_TIME_ZONE` is the IANA zone in which "today" is evaluated (an expense's
+`spentOn` must not be after today in this zone); an invalid zone fails
+startup.
+
 ## API
 
 | Method | Path            | Description                     |
@@ -80,9 +85,15 @@ Secrets, and there is no fallback.
 | `GET`  | `/api/categories` | Lists active categories; ?includeArchived=true includes archived ones |
 | `GET`  | `/api/categories/{id}` | Returns one category (archived ones too); 404 if unknown |
 | `PATCH` | `/api/categories/{id}` | Updates name, icon and/or archived; omitted or null fields are unchanged, "icon": "" clears the icon |
+| `POST` | `/api/expenses` | Creates an expense ({"amount": "200.00", "categoryId": 1, "spentOn": "2026-06-16", "note": "..."}); amount > 0 with at most two decimals, spentOn not after today (APP_TIME_ZONE); 400 on unknown category, 409 on archived category |
+| `GET` | `/api/expenses/{id}` | Returns one expense with its category embedded as {id, name, icon}; 404 if unknown |
+| `PUT` | `/api/expenses/{id}` | Replaces amount, categoryId, spentOn and note (an omitted note clears it); 409 when switching to an archived category |
+| `DELETE` | `/api/expenses/{id}` | Deletes an expense; 204, or 404 if unknown |
 | `GET`  | `/actuator/health` | Application health           |
 
 Errors are returned as RFC 9457 Problem Details (`application/problem+json`) with `type`, `title`, `status`, `detail` and `instance`. Validation errors (400) additionally contain `errors: [{"field": "...", "message": "..."}]`.
+
+Money amounts are JSON strings with two decimals (`"200.00"`). `currency` is always `PLN` for now and is not accepted in requests.
 
 ## CI and Docker images
 
@@ -118,7 +129,8 @@ Errors are returned as RFC 9457 Problem Details (`application/problem+json`) wit
   ```
 
 - The backend image reads `DB_URL`, `DB_USER`, `DB_PASSWORD`,
-  `DB_STARTUP_WAIT_TIMEOUT` and `DB_STARTUP_WAIT_INTERVAL` at runtime.
+  `DB_STARTUP_WAIT_TIMEOUT`, `DB_STARTUP_WAIT_INTERVAL` and `APP_TIME_ZONE`
+  at runtime.
 - The frontend image proxies `/api` to a host named `backend:8080`, which
   must resolve when the container starts.
 
