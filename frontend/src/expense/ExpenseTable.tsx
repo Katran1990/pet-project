@@ -3,17 +3,18 @@ import type { Expense, ExpenseList } from '../api/expenses.ts'
 type Props = {
   list: ExpenseList
   actionsDisabled: boolean
+  label: string
+  emptyText: string
   onEdit: (expense: Expense) => void
   onDelete: (expense: Expense) => void
-  onPrev: () => void
-  onNext: () => void
+  onPageChange: (page: number) => void
 }
 
-export function ExpenseTable({ list, actionsDisabled, onEdit, onDelete, onPrev, onNext }: Props) {
+export function ExpenseTable({ list, actionsDisabled, label, emptyText, onEdit, onDelete, onPageChange }: Props) {
   const { items, page, size, totalItems } = list
 
   if (totalItems === 0) {
-    return <p>No expenses this month.</p>
+    return <p>{emptyText}</p>
   }
 
   const firstShown = page * size + 1
@@ -21,7 +22,7 @@ export function ExpenseTable({ list, actionsDisabled, onEdit, onDelete, onPrev, 
 
   return (
     <>
-      <table className="expense-table" aria-label="Expenses this month">
+      <table className="expense-table" aria-label={label}>
         <thead>
           <tr>
             <th scope="col">Date</th>
@@ -52,10 +53,10 @@ export function ExpenseTable({ list, actionsDisabled, onEdit, onDelete, onPrev, 
       </table>
       <p className="pager">
         {`${firstShown}–${lastShown} of ${totalItems}`}
-        <button type="button" disabled={page === 0} onClick={onPrev}>
+        <button type="button" disabled={page === 0} onClick={() => onPageChange(page - 1)}>
           Previous
         </button>
-        <button type="button" disabled={(page + 1) * size >= totalItems} onClick={onNext}>
+        <button type="button" disabled={(page + 1) * size >= totalItems} onClick={() => onPageChange(page + 1)}>
           Next
         </button>
       </p>

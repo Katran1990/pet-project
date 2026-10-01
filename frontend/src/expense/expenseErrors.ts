@@ -78,7 +78,19 @@ function classifyFormError(error: ApiError, operation: 'create' | 'update', stat
   return { target: 'form', fieldErrors: {}, formError: `Could not save the expense: ${detailOrFallback(error, status)}` }
 }
 
-export function classifyMutationError(error: unknown, operation: 'create' | 'update' | 'delete'): ErrorOutcome {
+function classifyApplyError(error: ApiError, status: number): ErrorOutcome {
+  if (status >= 500) {
+    return { target: 'page', message: serverErrorMessage(error, status), refresh: false, leaveEdit: false }
+  }
+  return {
+    target: 'page',
+    message: `Could not apply the template: ${detailOrFallback(error, status)}`,
+    refresh: false,
+    leaveEdit: false,
+  }
+}
+
+export function classifyMutationError(error: unknown, operation: 'create' | 'update' | 'delete' | 'apply'): ErrorOutcome {
   if (isAbortError(error)) {
     return { target: 'ignore' }
   }
@@ -91,14 +103,23 @@ export function classifyMutationError(error: unknown, operation: 'create' | 'upd
   if (operation === 'delete') {
     return classifyDeleteError(error, error.status)
   }
+  if (operation === 'apply') {
+    return classifyApplyError(error, error.status)
+  }
   return classifyFormError(error, operation, error.status)
 }
 
-export function describeLoadError(error: unknown, what: 'expenses' | 'categories'): string | null {
+const LOAD_ERROR_LABELS = {
+  expenses: 'Could not load expenses',
+  categories: 'Could not load categories',
+  quickTemplates: 'Could not load quick templates',
+}
+
+export function describeLoadError(error: unknown, what: 'expenses' | 'categories' | 'quickTemplates'): string | null {
   if (isAbortError(error)) {
     return null
   }
-  const label = what === 'expenses' ? 'Could not load expenses' : 'Could not load categories'
+  const label = LOAD_ERROR_LABELS[what]
   if (!(error instanceof ApiError)) {
     return `${label}: unexpected error.`
   }
@@ -107,6 +128,10 @@ export function describeLoadError(error: unknown, what: 'expenses' | 'categories
   }
   if (error.status >= 500) {
     return serverErrorMessage(error, error.status)
+  }
+  const fieldEntries = Object.entries(error.fieldErrors)
+  if (fieldEntries.length > 0) {
+    return `${label}: ${fieldEntries.map(([field, message]) => `${field}: ${message}`).join('; ')}`
   }
   return `${label}: ${detailOrFallback(error, error.status)}`
 }

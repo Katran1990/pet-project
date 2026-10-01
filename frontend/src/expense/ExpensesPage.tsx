@@ -1,17 +1,24 @@
 import { useEffect, useId, useState } from 'react'
-import { listActiveCategories } from '../api/categories.ts'
+import { listAllCategories } from '../api/categories.ts'
 import type { Category } from '../api/categories.ts'
 import { createExpense, deleteExpense, listExpenses, updateExpense } from '../api/expenses.ts'
-import type { Expense, ExpenseInput, ExpenseList } from '../api/expenses.ts'
+import type { Expense, ExpenseFilters, ExpenseInput, ExpenseList } from '../api/expenses.ts'
+import { applyQuickTemplate, listQuickTemplates } from '../api/quickTemplates.ts'
+import type { QuickTemplate } from '../api/quickTemplates.ts'
 import { classifyMutationError, describeLoadError } from './expenseErrors.ts'
 import type { SubmitResult } from './expenseErrors.ts'
+import { filtersToSearch, hasAnyFilter, hasDateFilter, parseFilters } from './expenseFilters.ts'
+import { ExpenseFilterControls } from './ExpenseFilterControls.tsx'
 import { ExpenseForm } from './ExpenseForm.tsx'
 import { ExpenseTable } from './ExpenseTable.tsx'
+import { QuickTemplateBar } from './QuickTemplateBar.tsx'
 
 const PAGE_SIZE = 50
 
 export function ExpensesPage() {
   const [categories, setCategories] = useState<Category[] | null>(null)
+  const [templates, setTemplates] = useState<QuickTemplate[] | null>(null)
+  const [filters, setFilters] = useState<ExpenseFilters>(() => parseFilters(window.location.search))
   const [list, setList] = useState<ExpenseList | null>(null)
   const [page, setPage] = useState(0)
   const [reloadKey, setReloadKey] = useState(0)
@@ -23,10 +30,12 @@ export function ExpensesPage() {
 
   const sectionHeadingId = useId()
 
+  const activeCategories = categories === null ? null : categories.filter((category) => !category.archived)
+
   // Categories are loaded once on mount. A failure goes to the single pageError slot.
   useEffect(() => {
     const controller = new AbortController()
-    listActiveCategories(controller.signal)
+    listAllCategories(controller.signal)
       .then((result) => {
         if (controller.signal.aborted) {
           return
@@ -45,11 +54,33 @@ export function ExpensesPage() {
     return () => controller.abort()
   }, [])
 
-  // The list is reloaded on every page change and after every successful mutation (D1).
-  // The latest request wins: the previous one is aborted.
+  // Templates are loaded once on mount. A failure goes to the single pageError slot.
   useEffect(() => {
     const controller = new AbortController()
-    listExpenses(page, PAGE_SIZE, controller.signal)
+    listQuickTemplates(controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) {
+          return
+        }
+        setTemplates(result)
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) {
+          return
+        }
+        const message = describeLoadError(error, 'quickTemplates')
+        if (message !== null) {
+          setPageError(message)
+        }
+      })
+    return () => controller.abort()
+  }, [])
+
+  // The list is reloaded on every filter or page change and after every successful mutation
+  // (D1). The latest request wins: the previous one is aborted.
+  useEffect(() => {
+    const controller = new AbortController()
+    listExpenses(filters, page, PAGE_SIZE, controller.signal)
       .then((result) => {
         if (controller.signal.aborted) {
           return
@@ -71,7 +102,17 @@ export function ExpensesPage() {
         }
       })
     return () => controller.abort()
-  }, [page, reloadKey])
+  }, [filters, page, reloadKey])
+
+  // Keeps the URL in sync with the filters (decision 1), and normalises garbage params on
+  // mount (decision 8). replaceState, not pushState (decision 2): no extra history entry.
+  useEffect(() => {
+    const target = window.location.pathname + filtersToSearch(filters) + window.location.hash
+    const current = window.location.pathname + window.location.search + window.location.hash
+    if (target !== current) {
+      window.history.replaceState(window.history.state, '', target)
+    }
+  }, [filters])
 
   async function handleSubmit(input: ExpenseInput): Promise<SubmitResult> {
     setPageError(null)
@@ -155,17 +196,46 @@ export function ExpensesPage() {
     setEditing(null)
   }
 
-  function handlePrev() {
+  function handlePageChange(target: number) {
     setPageError(null)
     setStatus(null)
-    setPage((current) => Math.max(0, current - 1))
+    if (target === page) {
+      // The requested page's own load failed, so `list` still shows the previous page and
+      // `page` never advanced: setPage(target) would be a no-op. Force a refetch instead.
+      setReloadKey((key) => key + 1)
+    } else {
+      setPage(target)
+    }
   }
 
-  function handleNext() {
+  function handleFiltersChange(next: ExpenseFilters) {
     setPageError(null)
     setStatus(null)
-    setPage((current) => current + 1)
+    setFilters(next)
+    setPage(0)
+    setList(null)
   }
+
+  async function handleApply(template: QuickTemplate) {
+    setPageError(null)
+    setStatus(null)
+    setMutating(true)
+    try {
+      await applyQuickTemplate(template.id)
+      setStatus(`Expense added from template "${template.name}".`)
+      setReloadKey((key) => key + 1)
+    } catch (error) {
+      const outcome = classifyMutationError(error, 'apply')
+      if (outcome.target === 'page') {
+        setPageError(outcome.message)
+      }
+    } finally {
+      setMutating(false)
+    }
+  }
+
+  const periodIsSelected = hasDateFilter(filters)
+  const anyFilterSet = hasAnyFilter(filters)
 
   return (
     <>
@@ -176,16 +246,18 @@ export function ExpensesPage() {
         </p>
       )}
       <p role="status">{status}</p>
+      <QuickTemplateBar templates={templates} busy={mutating} onApply={(template) => void handleApply(template)} />
       <ExpenseForm
         key={editing ? `edit-${editing.id}` : `new-${formKey}`}
-        categories={categories}
+        categories={activeCategories}
         expense={editing ?? undefined}
         busy={mutating}
         onSubmit={handleSubmit}
         onCancel={editing ? handleCancelEdit : undefined}
       />
       <section aria-labelledby={sectionHeadingId}>
-        <h2 id={sectionHeadingId}>This month</h2>
+        <h2 id={sectionHeadingId}>{periodIsSelected ? 'Selected period' : 'This month'}</h2>
+        <ExpenseFilterControls filters={filters} categories={categories} onChange={handleFiltersChange} />
         {list === null && pageError === null && <p className="hint">Loading…</p>}
         {list !== null && (
           <>
@@ -195,10 +267,11 @@ export function ExpensesPage() {
             <ExpenseTable
               list={list}
               actionsDisabled={mutating}
+              label={periodIsSelected ? 'Expenses in the selected period' : 'Expenses this month'}
+              emptyText={anyFilterSet ? 'No expenses match the filters.' : 'No expenses this month.'}
               onEdit={handleEdit}
               onDelete={(expense) => void handleDelete(expense)}
-              onPrev={handlePrev}
-              onNext={handleNext}
+              onPageChange={handlePageChange}
             />
           </>
         )}

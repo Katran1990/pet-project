@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { deferred, json, mockFetch, noContent, problem, requests } from '../test/fetchMock.ts'
-import { FOOD, TRANSPORT, expense, list } from '../test/fixtures.ts'
+import { CATEGORIES_ROUTE, FOOD, TRANSPORT, baseRoutes, expense, list } from '../test/fixtures.ts'
 import { localIsoDate } from './localDate.ts'
 import { ExpensesPage } from './ExpensesPage.tsx'
 
@@ -21,7 +21,7 @@ describe('ExpensesPage table', () => {
       category: { id: TRANSPORT.id, name: TRANSPORT.name, icon: TRANSPORT.icon },
     })
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([rowWithNote, rowWithoutNote], { totalAmount: '205.00' })),
     })
 
@@ -64,7 +64,7 @@ describe('ExpensesPage table', () => {
     const firstList = list([row1, row2], { totalAmount: '22.50' })
     const secondList = list([row1, { ...row2, amount: '15.00' }], { totalAmount: '25.00' })
     const mock = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': [json(firstList), json(secondList)],
       'PUT /api/expenses/2': json({ ...row2, amount: '15.00' }),
     })
@@ -106,7 +106,7 @@ describe('ExpensesPage table', () => {
     // (a) the current (archived) category is kept as an extra, preselected option.
     const oldRow = expense({ id: 1, category: { id: 9, name: 'Old', icon: null } })
     const mockA = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': [
         json(list([oldRow], { totalAmount: '10.00' })),
         json(list([oldRow], { totalAmount: '10.00' })),
@@ -140,7 +140,8 @@ describe('ExpensesPage table', () => {
     // (b) categories failed to load: no "(archived)" suffix, and only the current category is offered.
     const foodRow = expense({ id: 2 })
     mockFetch({
-      'GET /api/categories': problem(500, 'Unexpected error'),
+      ...baseRoutes(),
+      [CATEGORIES_ROUTE]: problem(500, 'Unexpected error'),
       'GET /api/expenses?page=0&size=50': json(list([foodRow], { totalAmount: '10.00' })),
     })
     render(<ExpensesPage />)
@@ -157,7 +158,7 @@ describe('ExpensesPage table', () => {
   it('E16: editShowsConflictAndValidationErrorsNextToFields', async () => {
     const row = expense({ id: 1 })
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([row], { totalAmount: '10.00' })),
       'PUT /api/expenses/1': [
         problem(409, 'Category is archived'),
@@ -193,7 +194,7 @@ describe('ExpensesPage table', () => {
   it('E17: editOfDeletedExpenseShowsPageMessageAndRefreshes', async () => {
     const row = expense({ id: 1 })
     const mock = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': [
         json(list([row], { totalAmount: '10.00' })),
         json(list([], { totalAmount: '0.00' })),
@@ -220,7 +221,7 @@ describe('ExpensesPage table', () => {
   it('E18: cancelEditMakesNoRequest', async () => {
     const row = expense({ id: 1 })
     const mock = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([row], { totalAmount: '10.00' })),
     })
 
@@ -241,7 +242,7 @@ describe('ExpensesPage table', () => {
   it('E19: deleteAsksForConfirmation', async () => {
     const row = expense({ id: 1, amount: '10.00' })
     const mock = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': [
         json(list([row], { totalAmount: '10.00' })),
         json(list([], { totalAmount: '0.00' })),
@@ -271,7 +272,7 @@ describe('ExpensesPage table', () => {
     // (a) a 404 on delete shows the page-level message and refetches the list.
     const rowA = expense({ id: 1 })
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': [
         json(list([rowA], { totalAmount: '10.00' })),
         json(list([], { totalAmount: '0.00' })),
@@ -290,7 +291,7 @@ describe('ExpensesPage table', () => {
     // (b) a rejected delete (network) shows the page-level network message and does not refetch.
     const rowB = expense({ id: 2 })
     const mockB = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([rowB], { totalAmount: '10.00' })),
       'DELETE /api/expenses/2': new TypeError('Failed to fetch'),
     })
@@ -309,7 +310,7 @@ describe('ExpensesPage table', () => {
     const rowC1 = expense({ id: 3 })
     const rowC2 = expense({ id: 4 })
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': [
         json(list([rowC1, rowC2], { totalAmount: '20.00' })),
         json(list([rowC2], { totalAmount: '10.00' })),
@@ -330,7 +331,7 @@ describe('ExpensesPage table', () => {
     const row1 = expense({ id: 1, amount: '10.00' })
     const row2 = expense({ id: 2, amount: '20.00' })
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([row1, row2], { totalAmount: '136.00' })),
     })
     const { unmount } = render(<ExpensesPage />)
@@ -344,7 +345,7 @@ describe('ExpensesPage table', () => {
 
     // an empty month still shows the total, with no table.
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([], { totalAmount: '0.00' })),
     })
     render(<ExpensesPage />)
@@ -357,7 +358,7 @@ describe('ExpensesPage table', () => {
     const row2 = expense({ id: 2, amount: '0.10' })
     const row3 = expense({ id: 3, amount: '9999999999.99' })
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([row1, row2, row3], { totalAmount: '1234567890123456.78' })),
     })
 
@@ -381,7 +382,7 @@ describe('ExpensesPage table', () => {
     const page1 = list(buildItems(50, 51), { totalAmount: '200.00', page: 1, totalItems: 120 })
     const page2 = list(buildItems(20, 101), { totalAmount: '300.00', page: 2, totalItems: 120 })
     const mock = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(page0),
       'GET /api/expenses?page=1&size=50': json(page1),
       'GET /api/expenses?page=2&size=50': json(page2),
@@ -431,7 +432,7 @@ describe('ExpensesPage table', () => {
     const page1AfterDelete = list([expense({ id: 200 })], { totalAmount: '50.00', page: 1, totalItems: 51 })
 
     const mock = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(page0),
       'GET /api/expenses?page=1&size=50': [
         json(page1Initial),
@@ -481,7 +482,7 @@ describe('ExpensesPage table', () => {
     const page0AfterStepBack = list(buildItems(50, 1), { totalAmount: '500.00', page: 0, totalItems: 50 })
 
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': [json(page0Initial), json(page0AfterStepBack)],
       'GET /api/expenses?page=1&size=50': [json(page1Initial), json(page1Empty)],
       'DELETE /api/expenses/51': noContent(),
@@ -503,7 +504,7 @@ describe('ExpensesPage table', () => {
   it('E26: showsLoadingState', async () => {
     const { promise, resolve } = deferred<Response>()
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': promise,
     })
     render(<ExpensesPage />)
@@ -525,7 +526,7 @@ describe('ExpensesPage table', () => {
     const rowA2 = expense({ id: 2 })
     const putDeferred = deferred<Response>()
     const mockA = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': [
         json(list([rowA1, rowA2], { totalAmount: '20.00' })),
         json(list([rowA1, rowA2], { totalAmount: '20.00' })),
@@ -565,7 +566,7 @@ describe('ExpensesPage table', () => {
     const rowB1 = expense({ id: 3 })
     const deleteDeferred = deferred<Response>()
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': [
         json(list([rowB1], { totalAmount: '10.00' })),
         json(list([], { totalAmount: '0.00' })),
@@ -589,7 +590,7 @@ describe('ExpensesPage table', () => {
     // (c) creating with a deferred POST disables every row action.
     const postDeferred = deferred<Response>()
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': [
         json(list([expense({ id: 4 })], { totalAmount: '10.00' })),
         json(list([expense({ id: 4 }), expense({ id: 5 })], { totalAmount: '20.00' })),

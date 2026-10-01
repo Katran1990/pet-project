@@ -17,8 +17,35 @@ export type ExpenseList = { items: Expense[]; page: number; size: number; totalI
 
 export type ExpenseInput = { amount: string | null; categoryId: number | null; spentOn: string | null; note: string }
 
-export function listExpenses(page: number, size: number, signal?: AbortSignal): Promise<ExpenseList> {
-  const query = new URLSearchParams({ page: String(page), size: String(size) })
+// Unset values are null / []: they are left out of the query, and the API applies its defaults
+// (current month in APP_TIME_ZONE, all categories).
+export type ExpenseFilters = { from: string | null; to: string | null; categoryIds: number[] }
+
+// The one serializer for the API query and the page URL: from, to (yyyy-MM-dd),
+// categoryIds comma-separated (URLSearchParams encodes "," as %2C; the servlet container decodes it).
+export function expenseFilterParams(filters: ExpenseFilters): URLSearchParams {
+  const query = new URLSearchParams()
+  if (filters.from !== null) {
+    query.append('from', filters.from)
+  }
+  if (filters.to !== null) {
+    query.append('to', filters.to)
+  }
+  if (filters.categoryIds.length > 0) {
+    query.append('categoryIds', filters.categoryIds.join(','))
+  }
+  return query
+}
+
+export function listExpenses(
+  filters: ExpenseFilters,
+  page: number,
+  size: number,
+  signal?: AbortSignal,
+): Promise<ExpenseList> {
+  const query = expenseFilterParams(filters)
+  query.append('page', String(page))
+  query.append('size', String(size))
   return request<ExpenseList>('GET', `/api/expenses?${query.toString()}`, { signal })
 }
 
