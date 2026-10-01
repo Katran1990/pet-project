@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { deferred, html, json, mockFetch, problem, rawJson, requests } from '../test/fetchMock.ts'
-import { FOOD, TRANSPORT, expense, list } from '../test/fixtures.ts'
+import { CATEGORIES_ROUTE, FOOD, TEMPLATES_ROUTE, baseRoutes, expense, list } from '../test/fixtures.ts'
 import { localIsoDate } from './localDate.ts'
 import { ExpensesPage } from './ExpensesPage.tsx'
 
@@ -12,7 +12,7 @@ describe('ExpensesPage form', () => {
     vi.setSystemTime(new Date('2026-09-30T22:30:00Z'))
 
     const mock = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([], { totalAmount: '0.00' })),
     })
 
@@ -29,7 +29,7 @@ describe('ExpensesPage form', () => {
     expect(screen.getByLabelText('Note')).toHaveValue('')
 
     const sent = requests(mock).map((entry) => `${entry.method} ${entry.url}`)
-    expect(sent).toEqual(['GET /api/categories', 'GET /api/expenses?page=0&size=50'])
+    expect(sent).toEqual([CATEGORIES_ROUTE, TEMPLATES_ROUTE, 'GET /api/expenses?page=0&size=50'])
   })
 
   it('E2: createPostsTypedValuesAndRefetchesCurrentPage', async () => {
@@ -42,7 +42,7 @@ describe('ExpensesPage form', () => {
     const secondList = list([newRow, existingRow], { totalAmount: '999.99' })
 
     const mock = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': [json(list([], { totalAmount: '0.00' })), json(secondList)],
       'POST /api/expenses': json(expense({ id: 99 }), 201),
     })
@@ -70,7 +70,7 @@ describe('ExpensesPage form', () => {
 
     const listGets = sent.filter((entry) => entry.method === 'GET' && entry.url.startsWith('/api/expenses'))
     expect(listGets).toHaveLength(2)
-    const categoryGets = sent.filter((entry) => entry.url === '/api/categories')
+    const categoryGets = sent.filter((entry) => entry.url === '/api/categories?includeArchived=true')
     expect(categoryGets).toHaveLength(1)
 
     const table = screen.getByRole('table')
@@ -88,7 +88,7 @@ describe('ExpensesPage form', () => {
     // (a) the refetched list excludes the POST response's (previous month) row entirely.
     const refetchedA = list([expense({ id: 2, spentOn: '2026-10-01' })], { totalAmount: '42.00' })
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': [json(list([], { totalAmount: '0.00' })), json(refetchedA)],
       'POST /api/expenses': json(expense({ id: 999, spentOn: '2025-01-01', note: 'previous month' }), 201),
     })
@@ -110,7 +110,7 @@ describe('ExpensesPage form', () => {
     const rowB = expense({ id: 11, spentOn: '2026-09-28', note: 'back-dated new row', amount: '7.00' })
     const refetchedB = list([rowA, rowC, rowB], { totalAmount: '77.00' })
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': [json(list([], { totalAmount: '0.00' })), json(refetchedB)],
       'POST /api/expenses': json(expense({ id: 998 }), 201),
     })
@@ -126,7 +126,7 @@ describe('ExpensesPage form', () => {
 
   it('E4: emptyFieldsAreSentAsNullWithoutClientValidation', async () => {
     const mock = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([], { totalAmount: '0.00' })),
       'POST /api/expenses': problem(400, 'Invalid request content.', [
         { field: 'amount', message: 'must not be null' },
@@ -155,7 +155,7 @@ describe('ExpensesPage form', () => {
 
   it('E5: showsValidationErrorsNextToFields', async () => {
     const mock = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([], { totalAmount: '0.00' })),
       'POST /api/expenses': problem(400, 'Invalid request content.', [
         { field: 'amount', message: 'must be greater than 0' },
@@ -193,7 +193,7 @@ describe('ExpensesPage form', () => {
 
   it('E6: showsArchivedCategoryConflictNextToCategory', async () => {
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([], { totalAmount: '0.00' })),
       'POST /api/expenses': problem(409, 'Category is archived'),
     })
@@ -213,7 +213,7 @@ describe('ExpensesPage form', () => {
 
   it('E7: showsUnreadableBodyErrorAtFormLevel', async () => {
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([], { totalAmount: '0.00' })),
       'POST /api/expenses': problem(400, 'Failed to read request'),
     })
@@ -234,7 +234,7 @@ describe('ExpensesPage form', () => {
 
   it('E8: showsNetworkErrorAsPageLevelMessage', async () => {
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([], { totalAmount: '0.00' })),
       'POST /api/expenses': new TypeError('Failed to fetch'),
     })
@@ -258,7 +258,7 @@ describe('ExpensesPage form', () => {
 
   it('E9: showsServerErrorsAsPageLevelMessage', async () => {
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([], { totalAmount: '0.00' })),
       'POST /api/expenses': [problem(500, 'Unexpected error'), html(502)],
     })
@@ -277,7 +277,7 @@ describe('ExpensesPage form', () => {
   it('E10: showsPageLevelErrorWhenLoadsFail', async () => {
     // expenses load rejects (network)
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': new TypeError('Failed to fetch'),
     })
     const { unmount } = render(<ExpensesPage />)
@@ -288,7 +288,8 @@ describe('ExpensesPage form', () => {
 
     // categories load fails with a 500
     mockFetch({
-      'GET /api/categories': problem(500, 'Unexpected error'),
+      ...baseRoutes(),
+      [CATEGORIES_ROUTE]: problem(500, 'Unexpected error'),
       'GET /api/expenses?page=0&size=50': json(list([], { totalAmount: '0.00' })),
     })
     render(<ExpensesPage />)
@@ -298,7 +299,7 @@ describe('ExpensesPage form', () => {
   it('E11: disablesSubmitWhileRequestIsInFlight', async () => {
     const { promise, resolve } = deferred<Response>()
     const mock = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([], { totalAmount: '0.00' })),
       'POST /api/expenses': promise,
     })
@@ -322,7 +323,7 @@ describe('ExpensesPage form', () => {
 
   it('E12: clearsErrorsOnResubmit', async () => {
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([], { totalAmount: '0.00' })),
       'POST /api/expenses': [
         problem(400, 'Invalid request content.', [{ field: 'amount', message: 'must be greater than 0' }]),
@@ -348,7 +349,7 @@ describe('ExpensesPage form', () => {
   it('E27: showsGenericMessageForUnexpectedErrors', async () => {
     // (a) a 2xx list body that is not JSON gives a generic load-error message.
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': rawJson('not json', 200),
     })
     const { unmount } = render(<ExpensesPage />)
@@ -357,7 +358,7 @@ describe('ExpensesPage form', () => {
 
     // (b) a 2xx create response that is not JSON gives a generic page-level message, keeps the form, no refetch.
     const mock = mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([], { totalAmount: '0.00' })),
       'POST /api/expenses': rawJson('not json', 201),
     })
@@ -381,7 +382,7 @@ describe('ExpensesPage form', () => {
     // not "Could not load expenses: unexpected error." (client.ts's new readBodyText/cause).
     const bodyError = new TypeError('network error mid-body')
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': () => {
         const response = new Response(null, { status: 200, headers: { 'Content-Type': 'application/json' } })
         Object.defineProperty(response, 'text', { value: () => Promise.reject(bodyError) })
@@ -397,7 +398,7 @@ describe('ExpensesPage form', () => {
 
   it('E29: showsErrorsForUnknownFieldsAtFormLevel', async () => {
     mockFetch({
-      'GET /api/categories': json([FOOD, TRANSPORT]),
+      ...baseRoutes(),
       'GET /api/expenses?page=0&size=50': json(list([], { totalAmount: '0.00' })),
       'POST /api/expenses': problem(400, 'Invalid request content.', [
         { field: 'amount', message: 'must be greater than 0' },
@@ -422,7 +423,8 @@ describe('ExpensesPage form', () => {
   it('E30: listLoadDoesNotClearCategoriesError', async () => {
     const { promise, resolve } = deferred<Response>()
     mockFetch({
-      'GET /api/categories': problem(500, 'Unexpected error'),
+      ...baseRoutes(),
+      [CATEGORIES_ROUTE]: problem(500, 'Unexpected error'),
       'GET /api/expenses?page=0&size=50': promise,
     })
 

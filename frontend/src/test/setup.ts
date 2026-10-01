@@ -7,6 +7,8 @@ import { rejectUnexpected, unexpectedRequests } from './fetchMock.ts'
 beforeEach(() => {
   unexpectedRequests.length = 0
   vi.stubGlobal('fetch', vi.fn(rejectUnexpected))
+  // jsdom keeps the URL between tests; the page reads it at mount, so each test starts at '/'.
+  window.history.replaceState(null, '', '/')
 })
 
 // Vitest runs without `globals`, so Testing Library cannot register its automatic cleanup.
