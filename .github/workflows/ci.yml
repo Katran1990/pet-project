@@ -72,6 +72,11 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
+      # Vitest in run mode (no watch): component tests in jsdom with a mocked fetch,
+      # so no backend or database is needed.
+      - name: Test
+        run: npm test
+
   helm:
     name: Helm chart
     runs-on: ubuntu-latest

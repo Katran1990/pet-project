@@ -8,7 +8,8 @@ React single-page frontend.
 - **Backend** — Java 25, Spring Boot 4.1, Gradle, Postgres 17, Flyway. Virtual
   threads are enabled, so the code is plain blocking MVC (no WebFlux).
 - **Frontend** — React 19, TypeScript, Vite.
-- **Tests** — JUnit 5 with Testcontainers for integration tests (Docker required).
+- **Tests** — JUnit 5 with Testcontainers for integration tests (Docker required);
+  Vitest with Testing Library (jsdom) for the frontend.
 
 ## Layout
 
@@ -44,6 +45,7 @@ cd frontend && npm run dev
 
 ```bash
 cd backend && ./gradlew test
+cd frontend && npm test   # Vitest, jsdom, fetch is mocked: no backend needed
 ```
 
 ## Configuration
@@ -112,11 +114,11 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
 ## CI and Docker images
 
 - `.github/workflows/ci.yml` runs on every PR: backend `./gradlew build`
-  (compiles and runs tests), frontend lint and build, `helm lint` and
-  `helm template` of `infra/helm/pet-project` against the `envs/dev` and
-  `envs/prod` values from `pet-project-deploy@main`, a Trivy dependency scan
-  (see "Dependency vulnerability scanning (Trivy)" below), and actionlint over
-  `.github/workflows/`. Run the same checks locally with
+  (compiles and runs tests), frontend lint, build and tests (`npm test`),
+  `helm lint` and `helm template` of `infra/helm/pet-project` against the
+  `envs/dev` and `envs/prod` values from `pet-project-deploy@main`, a Trivy
+  dependency scan (see "Dependency vulnerability scanning (Trivy)" below),
+  and actionlint over `.github/workflows/`. Run the same checks locally with
   `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color`
   and `docker run --rm -v "$PWD:/apps" -w /apps alpine/helm:3.22.0 lint infra/helm/pet-project --namespace dev`.
   The `helm template` check additionally needs the `envs/dev` and

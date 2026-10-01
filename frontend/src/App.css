@@ -1,13 +1,8 @@
 .app {
-  max-width: 40rem;
+  max-width: 60rem;
   margin: 0 auto;
   padding: 3rem 1rem;
-  text-align: center;
-}
-
-.greeting {
-  font-size: 1.5rem;
-  font-weight: 600;
+  text-align: left;
 }
 
 .hint {
@@ -16,4 +11,58 @@
 
 .error {
   color: #d33;
+}
+
+/* The status live region is always rendered (so screen readers announce text changes),
+   so an empty one should not leave visible blank space. */
+p[role='status']:empty {
+  margin: 0;
+}
+
+.field-error {
+  color: #d33;
+  font-size: 0.85em;
+}
+
+.field {
+  margin-bottom: 1rem;
+}
+
+.field label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.expense-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.expense-table th,
+.expense-table td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #333;
+  text-align: left;
+}
+
+td.amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.month-total {
+  font-size: 1.1rem;
+}
+
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
 }
