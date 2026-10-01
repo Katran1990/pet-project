@@ -15,10 +15,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import dev.katran.pet.category.ActiveCategoryLookup;
 import dev.katran.pet.category.Category;
-import dev.katran.pet.category.CategoryRepository;
-import dev.katran.pet.web.ConflictException;
-import dev.katran.pet.web.InvalidFieldException;
 import dev.katran.pet.web.NotFoundException;
 
 @RestController
@@ -26,16 +24,16 @@ import dev.katran.pet.web.NotFoundException;
 public class BudgetLimitController {
 
 	private final BudgetLimitRepository limits;
-	private final CategoryRepository categories;
+	private final ActiveCategoryLookup activeCategories;
 
-	public BudgetLimitController(BudgetLimitRepository limits, CategoryRepository categories) {
+	public BudgetLimitController(BudgetLimitRepository limits, ActiveCategoryLookup activeCategories) {
 		this.limits = limits;
-		this.categories = categories;
+		this.activeCategories = activeCategories;
 	}
 
 	@PutMapping
 	public BudgetLimitResponse upsert(@Valid @RequestBody BudgetLimitRequest request) {
-		Category category = activeCategory(request.categoryId());
+		Category category = activeCategories.getActive(request.categoryId());
 		BudgetLimit limit = limits.findWithCategoryByCategoryIdAndMonth(category.getId(), request.month().atDay(1))
 				.orElseGet(() -> new BudgetLimit(category, request.month(), request.amount()));
 		limit.setAmount(request.amount());   // no-op for a new instance; the update for an existing one
@@ -54,15 +52,6 @@ public class BudgetLimitController {
 	public void delete(@PathVariable Long id) {
 		BudgetLimit limit = limits.findById(id).orElseThrow(() -> new NotFoundException("Budget limit", id));
 		limits.delete(limit);
-	}
-
-	private Category activeCategory(Long categoryId) {
-		Category category = categories.findById(categoryId)
-				.orElseThrow(() -> new InvalidFieldException("categoryId", "Category not found"));
-		if (category.isArchived()) {
-			throw new ConflictException("Category is archived");
-		}
-		return category;
 	}
 
 }
