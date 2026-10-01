@@ -28,9 +28,9 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
+import dev.katran.pet.category.ActiveCategoryLookup;
 import dev.katran.pet.category.Category;
 import dev.katran.pet.category.CategoryRepository;
-import dev.katran.pet.web.ConflictException;
 import dev.katran.pet.web.InvalidFieldException;
 import dev.katran.pet.web.NotFoundException;
 
@@ -40,17 +40,20 @@ public class ExpenseController {
 
 	private final ExpenseRepository expenses;
 	private final CategoryRepository categories;
+	private final ActiveCategoryLookup activeCategories;
 	private final Clock clock;
 
-	public ExpenseController(ExpenseRepository expenses, CategoryRepository categories, Clock clock) {
+	public ExpenseController(ExpenseRepository expenses, CategoryRepository categories,
+			ActiveCategoryLookup activeCategories, Clock clock) {
 		this.expenses = expenses;
 		this.categories = categories;
+		this.activeCategories = activeCategories;
 		this.clock = clock;
 	}
 
 	@PostMapping
 	public ResponseEntity<ExpenseResponse> create(@Valid @RequestBody ExpenseRequest request) {
-		Category category = activeCategory(request.categoryId());
+		Category category = activeCategories.getActive(request.categoryId());
 		Expense saved = expenses.saveAndFlush(
 				new Expense(category, request.amount(), request.spentOn(), request.note()));
 		URI location = ServletUriComponentsBuilder.fromCurrentRequest()
@@ -96,7 +99,7 @@ public class ExpenseController {
 		Expense expense = expenses.findWithCategoryById(id)
 				.orElseThrow(() -> new NotFoundException("Expense", id));
 		if (!request.categoryId().equals(expense.getCategory().getId())) {
-			expense.setCategory(activeCategory(request.categoryId()));
+			expense.setCategory(activeCategories.getActive(request.categoryId()));
 		}
 		expense.setAmount(request.amount());
 		expense.setSpentOn(request.spentOn());
@@ -110,15 +113,6 @@ public class ExpenseController {
 	public void delete(@PathVariable Long id) {
 		Expense expense = expenses.findById(id).orElseThrow(() -> new NotFoundException("Expense", id));
 		expenses.delete(expense);
-	}
-
-	private Category activeCategory(Long categoryId) {
-		Category category = categories.findById(categoryId)
-				.orElseThrow(() -> new InvalidFieldException("categoryId", "Category not found"));
-		if (category.isArchived()) {
-			throw new ConflictException("Category is archived");
-		}
-		return category;
 	}
 
 	// Archived categories are known ids too: reading history of an archived category is legitimate.

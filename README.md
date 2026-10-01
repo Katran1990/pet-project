@@ -74,7 +74,7 @@ Secrets, and there is no fallback.
 `APP_TIME_ZONE` is the IANA zone in which "today" is evaluated (an expense's
 `spentOn` must not be after today in this zone); an invalid zone fails
 startup. It also defines the "current month" that `GET /api/expenses` lists
-by default.
+by default, and the date of expenses created by `POST /api/quick-templates/{id}/apply`.
 
 ## API
 
@@ -95,11 +95,19 @@ by default.
 | `GET` | `/api/budget-limits?month=YYYY-MM` | Lists the limits of a month (month is required) with the category embedded as {id, name, icon}, ordered by category id |
 | `DELETE` | `/api/budget-limits/{id}` | Deletes a limit; 204, or 404 if unknown |
 | `GET` | `/api/reports/by-category?month=YYYY-MM` | Monthly report (month is required): {month, totalAmount, rows}; one row per category with expenses and/or a limit in that month: {category {id, name, icon}, amount, share (percent of totalAmount, one decimal, "0.0" when the total is zero), limit (null if none), remaining (limit minus amount, null if no limit, negative when exceeded)}; sorted by amount desc, then category id; archived categories included |
+| `POST` | `/api/quick-templates` | Creates a quick template ({"name": "Coffee", "categoryId": 1, "amount": "12.50", "sortOrder": 0}); all fields required; name is stripped (1-64 chars, not unique); amount > 0 with at most two decimals; sortOrder is an integer; 400 on unknown category, 409 on archived category |
+| `GET` | `/api/quick-templates` | Lists all quick templates sorted by sortOrder, then id, with the category embedded as {id, name, icon, archived}; templates of archived categories are included with archived: true (applying them returns 409) |
+| `GET` | `/api/quick-templates/{id}` | Returns one quick template; 404 if unknown |
+| `PATCH` | `/api/quick-templates/{id}` | Updates name, amount, categoryId and/or sortOrder; omitted or null fields, and "" for amount, categoryId or sortOrder, are left unchanged; 409 when switching to an archived category |
+| `DELETE` | `/api/quick-templates/{id}` | Deletes a template; expenses created from it are kept; 204, or 404 if unknown |
+| `POST` | `/api/quick-templates/{id}/apply` | Creates an expense dated today (APP_TIME_ZONE) with the template's amount and category; optional JSON body {"amount": "...", "note": "..."} overrides amount and note (a null or "" amount means no override; a body without Content-Type application/json is 415); 201 with the created expense (same body as POST /api/expenses); 409 if the template's category is archived |
 | `GET`  | `/actuator/health` | Application health           |
 
 Errors are returned as RFC 9457 Problem Details (`application/problem+json`) with `type`, `title`, `status`, `detail` and `instance`. Validation errors (400) additionally contain `errors: [{"field": "...", "message": "..."}]`.
 
 Money amounts are JSON strings with two decimals (`"200.00"`). `currency` is always `PLN` for now and is not accepted in requests. Percentages (`share`) are JSON strings with one decimal (`"64.8"`).
+
+In JSON request bodies, an empty string (`""`) in a numeric field is read as `null`: a required field then fails with `errors[{field, "must not be null"}]`, a PATCH field stays unchanged, and an apply override is not applied. Integer fields such as `categoryId` and `sortOrder` reject any JSON number with a fraction or an exponent (`1.5`, `7.0`, `1e1`) with 400 without `errors[]`.
 
 ## CI and Docker images
 
