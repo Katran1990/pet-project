@@ -12,6 +12,9 @@
 
 ## Commands
 - Backend tests: cd backend && ./gradlew test
+- Frontend tests: cd frontend && npm test
+- Frontend build and lint: cd frontend && npm run build && npm run lint
+  (tsc -b in the build also type-checks the tests)
 - Run backend:   cd backend && ./gradlew bootRun   (port 8080)
 - Run frontend:  cd frontend && npm run dev         (port 5173)
 - After any change to backend dependencies, run
