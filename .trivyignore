@@ -36,3 +36,16 @@ CVE-2026-93990 exp:2026-10-24
 #             ships 3.5.5-1ubuntu3.5. Waiting for an upstream rebuild.
 #   added:    2026-09-30 by Borys Bobrovych
 CVE-2026-84782 exp:2026-10-30
+
+# CVE-2026-103111
+#   package:  alpine/pcre2@10.48-r0 (frontend image)
+#   reason:   base image package (nginx:1.30-alpine, Alpine 3.24). Not
+#             exploitable here: the issue needs an attacker-controlled regular
+#             expression, while nginx compiles regexes only from its own config
+#             (frontend/nginx.conf has none) and the njs module, the only part
+#             that could compile regexes at request time, is not loaded.
+#             The fix (pcre2 10.49-r0) is already published in the Alpine 3.24
+#             package repository, but the latest nginx:1.30-alpine tag (built
+#             2026-09-22) still ships 10.48-r0. Waiting for an upstream rebuild.
+#   added:    2026-10-01 by Borys Bobrovych
+CVE-2026-103111 exp:2026-10-31
