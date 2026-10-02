@@ -1,16 +1,124 @@
 .app {
   max-width: 60rem;
   margin: 0 auto;
-  padding: 3rem 1rem;
-  text-align: left;
+  padding: var(--space-12) var(--space-4);
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-8);
+  border-bottom: 1px solid var(--color-grey-90);
+}
+
+.tabs button {
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-weight: var(--weight-semibold);
+}
+
+.tabs button:hover {
+  background: transparent;
+  color: var(--color-text-strong);
+}
+
+.tabs button[aria-current='page'] {
+  color: var(--color-text-strong);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
+}
+
+/* "Set limit" is a secondary button inside the report table. */
+.report-table button[type='submit']:not(:disabled) {
+  background: transparent;
+  border-color: var(--color-grey-60);
+}
+
+.report-table button[type='submit']:hover:not(:disabled) {
+  background: var(--color-hover);
+  border-color: var(--color-grey-40);
+}
+
+/* Size S buttons. */
+.expense-table button,
+.report-table button,
+.pager button,
+.quick-templates button {
+  padding: 5px 15px;
+  border-radius: var(--radius-button-s);
+  font-size: var(--text-3-size);
+  line-height: var(--text-3-line);
+  letter-spacing: var(--text-3-spacing);
+}
+
+/* A long unbroken template name must not widen the page. */
+.quick-templates button {
+  overflow-wrap: anywhere;
+}
+
+.expense-table td > button + button {
+  margin-left: var(--space-2);
+}
+
+.expense-table td:last-child {
+  white-space: nowrap;
+}
+
+/* The expense form is the only form that is a direct child of .app. */
+.app > form {
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+  padding: var(--space-6);
+  margin-bottom: var(--space-12);
+}
+
+.app > form :is(input[type='text'], input[type='date'], select) {
+  width: 100%;
+  max-width: 24rem;
+}
+
+.field {
+  margin-bottom: var(--space-4);
+}
+
+.field label,
+.filters legend {
+  display: block;
+  margin-bottom: var(--space-1);
+  font-size: var(--text-3-size);
+  line-height: var(--text-3-line);
+  letter-spacing: var(--text-3-spacing);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-muted);
+}
+
+.filters legend {
+  padding: 0;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .hint {
-  opacity: 0.6;
+  color: var(--color-text-muted);
+  font-size: var(--text-3-size);
+  line-height: var(--text-3-line);
+  letter-spacing: var(--text-3-spacing);
 }
 
 .error {
-  color: #d33;
+  margin-block: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-card);
+  background: var(--color-danger-bg);
+  color: var(--color-text-strong);
 }
 
 /* The status live region is always rendered (so screen readers announce text changes),
@@ -20,112 +128,166 @@ p[role='status']:empty {
 }
 
 .field-error {
-  color: #d33;
-  font-size: 0.85em;
-}
-
-.field {
-  margin-bottom: 1rem;
-}
-
-.field label {
-  display: block;
-  margin-bottom: 0.25rem;
-  font-weight: 600;
-}
-
-.form-actions {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.expense-table,
-.report-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.expense-table th,
-.expense-table td,
-.report-table th,
-.report-table td {
-  padding: 0.4rem 0.6rem;
-  border-bottom: 1px solid #333;
-  text-align: left;
-}
-
-td.amount {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.month-total {
-  font-size: 1.1rem;
-}
-
-.pager {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.quick-templates {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  margin-top: var(--space-1);
+  color: var(--color-danger);
+  font-size: var(--text-3-size);
+  line-height: var(--text-3-line);
+  letter-spacing: var(--text-3-spacing);
 }
 
 .filters {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
-  gap: 1rem;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
 }
 
 .filters fieldset {
   border: none;
   padding: 0;
+  margin: 0;
+  min-width: 0;
 }
 
 .filters fieldset label {
-  display: inline-block;
-  margin-right: 0.75rem;
+  overflow-wrap: anywhere;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-right: var(--space-4);
 }
 
-.tabs {
+.quick-templates {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
 }
 
-.tabs button[aria-current='page'] {
-  font-weight: 700;
-  text-decoration: underline;
+.expense-table,
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-block: var(--space-4);
+}
+
+.expense-table th,
+.expense-table td,
+.report-table th,
+.report-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-grey-90);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.expense-table thead th,
+.report-table thead th {
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--text-3-size);
+  line-height: var(--text-3-line);
+  letter-spacing: var(--text-3-spacing);
+  font-weight: var(--weight-semibold);
+}
+
+.report-table tbody th {
+  color: var(--color-text-strong);
+  font-weight: var(--weight-semibold);
+}
+
+td.amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.month-total {
+  font-size: var(--text-1-size);
+  line-height: var(--text-1-line);
+  margin-block: var(--space-4);
+}
+
+.month-total strong {
+  font-family: var(--font-mono);
+}
+
+.report-table tr.over-limit th,
+.report-table tr.over-limit td {
+  background: var(--color-danger-bg);
+  color: var(--color-text-strong);
+}
+
+.report-table tr.over-limit th {
+  box-shadow: inset 4px 0 0 var(--color-danger);
+}
+
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-3-size);
+  line-height: var(--text-3-line);
+  letter-spacing: var(--text-3-spacing);
 }
 
 .month-switcher {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.75rem;
+  gap: var(--space-3);
+  margin-block: var(--space-4);
 }
 
 .month-switcher h2 {
   margin: 0;
 }
 
-.report-table tr.over-limit th,
-.report-table tr.over-limit td {
-  background: rgba(221, 51, 51, 0.15);
-}
-
 .limit-form {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .limit-form input {
   width: 8rem;
+  padding-block: 3px;
+}
+
+.limit-form p {
+  flex-basis: 100%;
+}
+
+@media (max-width: 640px) {
+  .app {
+    padding: var(--space-8) var(--space-4);
+  }
+
+  .app > form {
+    padding: var(--space-4);
+  }
+}
+
+@media (max-width: 1000px) {
+  .expense-table,
+  .report-table {
+    display: block;
+    overflow-x: auto;
+  }
+}
+
+/* Forced colors drop box-shadow and background gradients: keep an active-tab cue and the native select arrow. */
+@media (forced-colors: active) {
+  .tabs button[aria-current='page'] {
+    text-decoration: underline;
+  }
+
+  select {
+    appearance: auto;
+  }
 }
