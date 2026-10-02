@@ -19,6 +19,13 @@ export const OLD: Category = { id: 9, name: 'Old', icon: null, archived: true, c
 
 export const CATEGORIES_ROUTE = 'GET /api/categories?includeArchived=true'
 export const TEMPLATES_ROUTE = 'GET /api/quick-templates'
+export const CATEGORY_POST_ROUTE = 'POST /api/categories'
+export const categoryPatchRoute = (id: number) => `PATCH /api/categories/${id}`
+
+// A full CategoryResponse {id, name, icon, archived, createdAt}, as every /api/categories endpoint returns it.
+export function category(overrides: Partial<Category> = {}): Category {
+  return { ...FOOD, ...overrides }
+}
 
 // Returns exactly [FOOD, TRANSPORT] and no templates, so card 7's assertions keep their
 // meaning. New tests that need OLD or templates override the key after spreading.
