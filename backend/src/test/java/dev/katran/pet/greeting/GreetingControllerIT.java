@@ -105,11 +105,19 @@ class GreetingControllerIT {
 				.exchange()
 				.expectStatus()
 				.isBadRequest()
+				.expectHeader()
+				.contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
 				.expectBody()
 				.jsonPath("$.status")
 				.isEqualTo(400)
-				.jsonPath("$.path")
-				.isEqualTo("/api/greetings");
+				.jsonPath("$.instance")
+				.isEqualTo("/api/greetings")
+				.jsonPath("$.errors.length()")
+				.isEqualTo(1)
+				.jsonPath("$.errors[0].field")
+				.isEqualTo("message")
+				.jsonPath("$.errors[0].message")
+				.value(String.class, msg -> assertThat(msg).isNotBlank());
 
 		assertThat(greetings.count()).isEqualTo(before);
 	}
@@ -125,11 +133,19 @@ class GreetingControllerIT {
 				.exchange()
 				.expectStatus()
 				.isBadRequest()
+				.expectHeader()
+				.contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
 				.expectBody()
 				.jsonPath("$.status")
 				.isEqualTo(400)
-				.jsonPath("$.path")
-				.isEqualTo("/api/greetings");
+				.jsonPath("$.instance")
+				.isEqualTo("/api/greetings")
+				.jsonPath("$.errors.length()")
+				.isEqualTo(1)
+				.jsonPath("$.errors[0].field")
+				.isEqualTo("message")
+				.jsonPath("$.errors[0].message")
+				.value(String.class, msg -> assertThat(msg).isNotBlank());
 
 		assertThat(greetings.count()).isEqualTo(before);
 	}
@@ -148,11 +164,19 @@ class GreetingControllerIT {
 				.exchange()
 				.expectStatus()
 				.isBadRequest()
+				.expectHeader()
+				.contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
 				.expectBody()
 				.jsonPath("$.status")
 				.isEqualTo(400)
-				.jsonPath("$.path")
-				.isEqualTo("/api/greetings");
+				.jsonPath("$.instance")
+				.isEqualTo("/api/greetings")
+				.jsonPath("$.errors.length()")
+				.isEqualTo(1)
+				.jsonPath("$.errors[0].field")
+				.isEqualTo("message")
+				.jsonPath("$.errors[0].message")
+				.value(String.class, msg -> assertThat(msg).isNotBlank());
 
 		assertThat(greetings.count()).isEqualTo(before);
 	}
@@ -169,11 +193,19 @@ class GreetingControllerIT {
 				.exchange()
 				.expectStatus()
 				.isBadRequest()
+				.expectHeader()
+				.contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
 				.expectBody()
 				.jsonPath("$.status")
 				.isEqualTo(400)
-				.jsonPath("$.path")
-				.isEqualTo("/api/greetings");
+				.jsonPath("$.instance")
+				.isEqualTo("/api/greetings")
+				.jsonPath("$.errors.length()")
+				.isEqualTo(1)
+				.jsonPath("$.errors[0].field")
+				.isEqualTo("message")
+				.jsonPath("$.errors[0].message")
+				.value(String.class, msg -> assertThat(msg).isNotBlank());
 
 		assertThat(greetings.count()).isEqualTo(before);
 	}
@@ -189,11 +221,15 @@ class GreetingControllerIT {
 				.exchange()
 				.expectStatus()
 				.isBadRequest()
+				.expectHeader()
+				.contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON)
 				.expectBody()
 				.jsonPath("$.status")
 				.isEqualTo(400)
-				.jsonPath("$.path")
-				.isEqualTo("/api/greetings");
+				.jsonPath("$.instance")
+				.isEqualTo("/api/greetings")
+				.jsonPath("$.errors")
+				.doesNotExist();
 
 		assertThat(greetings.count()).isEqualTo(before);
 	}

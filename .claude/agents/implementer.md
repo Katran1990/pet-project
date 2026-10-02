@@ -17,9 +17,13 @@ Rules:
   existing tests only when the plan says behaviour changes.
 - Make sure the project compiles: `cd backend && ./gradlew compileJava`,
   and for frontend changes `cd frontend && npm run build`.
-- No git commands. No new dependencies unless the plan lists them.
+- Git: read-only commands only (git status, git diff, git log). Never
+  commit, branch, checkout, push, stash, reset or otherwise change state.
+- No new dependencies unless the plan lists them.
 - Never touch .devcontainer/, .claude/, .github/ or CI/deploy files unless
   the plan explicitly says so.
+- Report honestly which commands you ran. A rule you had to break is
+  reported, not hidden.
 
 Return a short report: files changed, anything that deviates from the plan
 and why, anything you could not do.

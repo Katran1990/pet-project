@@ -8,7 +8,8 @@ React single-page frontend.
 - **Backend** — Java 25, Spring Boot 4.1, Gradle, Postgres 17, Flyway. Virtual
   threads are enabled, so the code is plain blocking MVC (no WebFlux).
 - **Frontend** — React 19, TypeScript, Vite.
-- **Tests** — JUnit 5 with Testcontainers for integration tests (Docker required).
+- **Tests** — JUnit 5 with Testcontainers for integration tests (Docker required);
+  Vitest with Testing Library (jsdom) for the frontend.
 
 ## Layout
 
@@ -44,11 +45,12 @@ cd frontend && npm run dev
 
 ```bash
 cd backend && ./gradlew test
+cd frontend && npm test   # Vitest, jsdom, fetch is mocked: no backend needed
 ```
 
 ## Configuration
 
-The database connection is read from the environment; the defaults in
+Configuration is read from the environment; the defaults in
 `backend/src/main/resources/application.properties` point at the dev container
 Postgres and are meant for local development only.
 
@@ -59,6 +61,7 @@ Postgres and are meant for local development only.
 | `DB_PASSWORD`              | `app`                                      |
 | `DB_STARTUP_WAIT_TIMEOUT`  | `60s`                                      |
 | `DB_STARTUP_WAIT_INTERVAL` | `2s`                                       |
+| `APP_TIME_ZONE`            | `Europe/Warsaw`                            |
 
 On startup the backend waits up to `DB_STARTUP_WAIT_TIMEOUT` for Postgres to
 accept connections, trying again every `DB_STARTUP_WAIT_INTERVAL`.
@@ -70,21 +73,52 @@ The `DB_USER`/`DB_PASSWORD` defaults apply only to local runs. In Kubernetes,
 they always come from the Secret `postgres-credentials` created by Sealed
 Secrets, and there is no fallback.
 
+`APP_TIME_ZONE` is the IANA zone in which "today" is evaluated (an expense's
+`spentOn` must not be after today in this zone); an invalid zone fails
+startup. It also defines the "current month" that `GET /api/expenses` lists
+by default, and the date of expenses created by `POST /api/quick-templates/{id}/apply`.
+
 ## API
 
 | Method | Path            | Description                     |
 | ------ | --------------- | ------------------------------- |
 | `GET`  | `/api/greeting` | Returns the stored greeting     |
 | `POST` | `/api/greetings` | Creates a greeting ({"message": "..."}, 1-200 chars) |
+| `POST` | `/api/categories` | Creates a category ({"name": "...", "icon": "..."}); name is stripped, empty icon stored as null; 409 on duplicate name, case-insensitive |
+| `GET`  | `/api/categories` | Lists active categories; ?includeArchived=true includes archived ones |
+| `GET`  | `/api/categories/{id}` | Returns one category (archived ones too); 404 if unknown |
+| `PATCH` | `/api/categories/{id}` | Updates name, icon and/or archived; omitted or null fields are unchanged, "icon": "" clears the icon |
+| `POST` | `/api/expenses` | Creates an expense ({"amount": "200.00", "categoryId": 1, "spentOn": "2026-06-16", "note": "..."}); amount > 0 with at most two decimals, spentOn not after today (APP_TIME_ZONE); 400 on unknown category, 409 on archived category |
+| `GET` | `/api/expenses` | Lists expenses: ?from=&to= (ISO dates, inclusive; default: current month in APP_TIME_ZONE), ?categoryIds=1,4,7 (empty = all; unknown id → 400), ?page= (0-based) and ?size= (1-200, default 50); sorted by spentOn desc, createdAt desc; returns {items, page, size, totalItems, totalAmount} with totalAmount summed over all matching rows |
+| `GET` | `/api/expenses/{id}` | Returns one expense with its category embedded as {id, name, icon}; 404 if unknown |
+| `PUT` | `/api/expenses/{id}` | Replaces amount, categoryId, spentOn and note (an omitted note clears it); 409 when switching to an archived category |
+| `DELETE` | `/api/expenses/{id}` | Deletes an expense; 204, or 404 if unknown |
+| `PUT` | `/api/budget-limits` | Sets the limit of a category for a month ({"categoryId": 1, "month": "2026-07", "amount": "1500.00"}); creates or updates (upsert) and always returns 200 with the stored limit; amount > 0 with at most two decimals; 400 on malformed month or unknown category, 409 on archived category |
+| `GET` | `/api/budget-limits?month=YYYY-MM` | Lists the limits of a month (month is required) with the category embedded as {id, name, icon}, ordered by category id |
+| `DELETE` | `/api/budget-limits/{id}` | Deletes a limit; 204, or 404 if unknown |
+| `GET` | `/api/reports/by-category?month=YYYY-MM` | Monthly report (month is required): {month, totalAmount, rows}; one row per category with expenses and/or a limit in that month: {category {id, name, icon}, amount, share (percent of totalAmount, one decimal, "0.0" when the total is zero), limit (null if none), remaining (limit minus amount, null if no limit, negative when exceeded)}; sorted by amount desc, then category id; archived categories included |
+| `POST` | `/api/quick-templates` | Creates a quick template ({"name": "Coffee", "categoryId": 1, "amount": "12.50", "sortOrder": 0}); all fields required; name is stripped (1-64 chars, not unique); amount > 0 with at most two decimals; sortOrder is an integer; 400 on unknown category, 409 on archived category |
+| `GET` | `/api/quick-templates` | Lists all quick templates sorted by sortOrder, then id, with the category embedded as {id, name, icon, archived}; templates of archived categories are included with archived: true (applying them returns 409) |
+| `GET` | `/api/quick-templates/{id}` | Returns one quick template; 404 if unknown |
+| `PATCH` | `/api/quick-templates/{id}` | Updates name, amount, categoryId and/or sortOrder; omitted or null fields, and "" for amount, categoryId or sortOrder, are left unchanged; 409 when switching to an archived category |
+| `DELETE` | `/api/quick-templates/{id}` | Deletes a template; expenses created from it are kept; 204, or 404 if unknown |
+| `POST` | `/api/quick-templates/{id}/apply` | Creates an expense dated today (APP_TIME_ZONE) with the template's amount and category; optional JSON body {"amount": "...", "note": "..."} overrides amount and note (a null or "" amount means no override; a body without Content-Type application/json is 415); 201 with the created expense (same body as POST /api/expenses); 409 if the template's category is archived |
 | `GET`  | `/actuator/health` | Application health           |
+
+Errors are returned as RFC 9457 Problem Details (`application/problem+json`) with `type`, `title`, `status`, `detail` and `instance`. Validation errors (400) additionally contain `errors: [{"field": "...", "message": "..."}]`.
+
+Money amounts are JSON strings with two decimals (`"200.00"`). `currency` is always `PLN` for now and is not accepted in requests. Percentages (`share`) are JSON strings with one decimal (`"64.8"`).
+
+In JSON request bodies, an empty string (`""`) in a numeric field is read as `null`: a required field then fails with `errors[{field, "must not be null"}]`, a PATCH field stays unchanged, and an apply override is not applied. Integer fields such as `categoryId` and `sortOrder` reject any JSON number with a fraction or an exponent (`1.5`, `7.0`, `1e1`) with 400 without `errors[]`.
 
 ## CI and Docker images
 
 - `.github/workflows/ci.yml` runs on every PR: backend `./gradlew build`
-  (compiles and runs tests), frontend lint and build, `helm lint` and
-  `helm template` of `infra/helm/pet-project` against the `envs/dev` and
-  `envs/prod` values from `pet-project-deploy@main`, and actionlint over
-  `.github/workflows/`. Run the same checks locally with
+  (compiles and runs tests), frontend lint, build and tests (`npm test`),
+  `helm lint` and `helm template` of `infra/helm/pet-project` against the
+  `envs/dev` and `envs/prod` values from `pet-project-deploy@main`, a Trivy
+  dependency scan (see "Dependency vulnerability scanning (Trivy)" below),
+  and actionlint over `.github/workflows/`. Run the same checks locally with
   `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color`
   and `docker run --rm -v "$PWD:/apps" -w /apps alpine/helm:3.22.0 lint infra/helm/pet-project --namespace dev`.
   The `helm template` check additionally needs the `envs/dev` and
@@ -96,10 +130,13 @@ Secrets, and there is no fallback.
   docker run --rm -v "$PWD:/apps" -v "/tmp:/vals" -w /apps alpine/helm:3.22.0 \
     template pet-project-dev infra/helm/pet-project -n dev -f /vals/dev-values.yaml > /dev/null
   ```
-- `.github/workflows/build-images.yml` pushes
+- `.github/workflows/build-images.yml` builds, scans (Trivy) and pushes
   `ghcr.io/<owner>/<repo>/backend:<tag>` and
   `ghcr.io/<owner>/<repo>/frontend:<tag>` on push to `development`/`main`,
-  tagged with the branch name and the commit SHA.
+  tagged with the branch name and the commit SHA. Each image is scanned
+  before it is pushed; a failed scan blocks the push of that image. The two
+  images build in parallel with fail-fast, so one may already have been
+  pushed by the time the other's scan fails.
 - Build the images locally:
 
   ```bash
@@ -108,9 +145,58 @@ Secrets, and there is no fallback.
   ```
 
 - The backend image reads `DB_URL`, `DB_USER`, `DB_PASSWORD`,
-  `DB_STARTUP_WAIT_TIMEOUT` and `DB_STARTUP_WAIT_INTERVAL` at runtime.
+  `DB_STARTUP_WAIT_TIMEOUT`, `DB_STARTUP_WAIT_INTERVAL` and `APP_TIME_ZONE`
+  at runtime.
 - The frontend image proxies `/api` to a host named `backend:8080`, which
   must resolve when the container starts.
+
+### Dependency vulnerability scanning (Trivy)
+
+- **What runs where:** a filesystem scan of `backend/gradle.lockfile` and
+  `frontend/package-lock.json` runs in `ci.yml` on every PR and on every push
+  to `development`/`main`. An image scan of the built `backend` and
+  `frontend` images runs in `build-images.yml` before they are pushed.
+- **What fails:** fixed HIGH and CRITICAL findings fail the job. MEDIUM, LOW
+  and UNKNOWN are only reported. Unfixed vulnerabilities (no patched version
+  available yet) are ignored by default (`ignore-unfixed`), so they appear
+  neither in the report nor in the gate. npm devDependencies are included in
+  the scan (`TRIVY_INCLUDE_DEV_DEPS`); Gradle test dependencies are scanned
+  too, because `gradle.lockfile` does not separate configurations.
+- **How to read findings:**
+  - The job summary of the run has a table with package, installed version,
+    fixed version and CVE.
+  - The failing gate step's log lists the blocking findings.
+  - Security tab → Code scanning, filtered by tool "Trivy" and category
+    `trivy-fs` / `trivy-image-backend` / `trivy-image-frontend`.
+  - Fork and Dependabot PRs only get the job summary; they cannot upload
+    SARIF.
+- **How to fix:** bump the dependency, or rebuild on a newer base image. For
+  a Gradle dependency change, run `cd backend && ./gradlew dependencies
+  --write-locks` and commit `backend/gradle.lockfile`.
+- **How to suppress:** add the CVE to `/.trivyignore`, following the comment
+  convention at the top of that file (package, reason, added-by/date), with
+  a mandatory `exp:YYYY-MM-DD` at most 90 days ahead. The finding comes back
+  and fails CI again once that date passes.
+- **Run locally**, with the pinned Trivy version used by CI:
+
+  ```bash
+  docker run --rm -v "$PWD:/repo" -w /repo -e TRIVY_INCLUDE_DEV_DEPS=true \
+    aquasec/trivy:0.70.0@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e \
+    fs --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 .
+
+  docker build -t pet-backend backend && docker build -t pet-frontend frontend
+  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/repo" -w /repo \
+    -e TRIVY_IMAGE_SRC=docker \
+    aquasec/trivy:0.70.0@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e \
+    image --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 pet-backend
+  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD:/repo" -w /repo \
+    -e TRIVY_IMAGE_SRC=docker \
+    aquasec/trivy:0.70.0@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e \
+    image --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL --exit-code 1 pet-frontend
+  ```
+
+  The repo is mounted at `/repo` (Trivy's working directory) so `.trivyignore` at the
+  repository root is picked up the same way it is in CI.
 
 ## Deploy (Helm + Argo CD)
 
@@ -259,8 +345,9 @@ fail to start.
 ### Rotate the credential
 
 `POSTGRES_PASSWORD` is only read when the database is first initialised.
-After that, restarting Postgres never changes the password; only
-`\password` does.
+After that, restarting Postgres never changes the password; only changing
+it inside Postgres does (`\password`, or `ALTER USER` as in "Change the
+password of an already initialised database").
 
 Every merge also triggers a new backend rollout. Any push to
 `development`/`main` runs "Build images", then "Update deploy manifests"
@@ -340,6 +427,70 @@ Follow the same order as Rotate, with these differences:
   not managed", delete the old Secret by hand and restart the controller:
   `kubectl -n <env> delete secret postgres-credentials`, then `kubectl -n
   kube-system rollout restart deployment/sealed-secrets-controller`.
+
+### Change the password of an already initialised database
+
+Postgres stores the password of user `app` on its data volume (the PVC
+`data-postgres-0` of `statefulset/postgres`) when the database is first
+initialised, and never reads `POSTGRES_PASSWORD` again after that. A change
+of the sealed password therefore only changes the Secret
+`postgres-credentials`: the backend picks up the new value, the database
+keeps the old one, and the backend fails with `password authentication
+failed for user "app"`. Restarting or recreating the `postgres-0` pod does
+not help, because the volume is kept.
+
+This is the non-interactive equivalent of Rotate steps 2 and 3; do not run
+both `\password` and `ALTER USER` for the same change.
+
+Do the step below once per namespace, every time the sealed password for
+that namespace changes:
+
+- on every rotation (see "Rotate the credential");
+- on the first release of Sealed Secrets to a namespace that already has a
+  database, including the first release to `prod` (see "First switch from
+  the old `app/app`").
+
+A new namespace, or a dev database whose volume was reset, is initialised
+with the sealed password and needs nothing.
+
+Run it only after the SealedSecret in that namespace is `Synced` and the
+Secret fingerprint has changed (Rotate steps 1-2); in `prod` that means
+after the `main` merge has synced. Before that, the Secret still holds the
+old password or does not exist yet, and the commands would set the wrong
+one.
+
+Replace `<ns>` with the namespace (`dev` or `prod`). Run the lines one at
+a time and check the output of each before running the next:
+
+```bash
+NEWPASS=$(kubectl -n <ns> get secret postgres-credentials -o jsonpath='{.data.password}' | base64 -d)
+[ -n "$NEWPASS" ] || echo "NEWPASS is empty - stop"
+kubectl -n <ns> exec statefulset/postgres -- psql -U app -d app -c "ALTER USER app PASSWORD '$NEWPASS';"
+kubectl -n <ns> rollout restart deployment/backend
+```
+
+- The first line reads the new password from the Secret.
+- The second line (the guard) only prints a warning if `NEWPASS` is
+  empty; it does not stop the next lines from running by itself. Check
+  its output before running the third line: if `NEWPASS` is empty, stop,
+  because `ALTER USER ... PASSWORD ''` would clear the password instead
+  of setting it, and would still print `ALTER ROLE`, so that output alone
+  does not prove success.
+- The third line runs `psql` over the local socket inside the Postgres
+  pod, which needs no password, and changes the password stored on the
+  volume. It must print `ALTER ROLE`.
+- The fourth line restarts the backend so that every pod reconnects
+  with the new password (Rotate step 3 explains why this is always
+  needed). Follow it with `kubectl -n <ns> rollout status
+  deployment/backend` and verify as in Rotate step 4.
+- Then run `unset NEWPASS`.
+
+Unlike `\password app`, running the commands above exposes the password on
+the `kubectl` and `psql` command lines, so it is visible in the process
+list of your machine and of the pod while the command runs. Use `\password
+app` (Rotate step 2) where that matters. The quoting in the SQL statement
+is safe for the hex passwords produced by "Seal credentials"; a password
+containing `'` would break it.
 
 ### Controller key lost / cluster recreated
 

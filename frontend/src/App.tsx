@@ -1,45 +1,31 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import './App.css'
+import { CategoriesPage } from './category/CategoriesPage.tsx'
+import { ExpensesPage } from './expense/ExpensesPage.tsx'
+import { MonthReportPage } from './report/MonthReportPage.tsx'
 
-type GreetingResponse = {
-  message: string
-}
-
-type State =
-  | { status: 'loading' }
-  | { status: 'loaded'; message: string }
-  | { status: 'failed'; error: string }
+type Tab = 'expenses' | 'month' | 'categories'
 
 function App() {
-  const [state, setState] = useState<State>({ status: 'loading' })
-
-  useEffect(() => {
-    const controller = new AbortController()
-
-    fetch('/api/greeting', { signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`GET /api/greeting failed with status ${response.status}`)
-        }
-        const greeting: GreetingResponse = await response.json()
-        setState({ status: 'loaded', message: greeting.message })
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === 'AbortError') {
-          return
-        }
-        setState({ status: 'failed', error: error instanceof Error ? error.message : String(error) })
-      })
-
-    return () => controller.abort()
-  }, [])
-
+  const [tab, setTab] = useState<Tab>('expenses')
   return (
     <main className="app">
-      <h1>My pet project</h1>
-      {state.status === 'loading' && <p className="hint">Loading…</p>}
-      {state.status === 'loaded' && <p className="greeting">{state.message}</p>}
-      {state.status === 'failed' && <p className="error">{state.error}</p>}
+      <nav aria-label="Pages" className="tabs">
+        <button type="button" aria-current={tab === 'expenses' ? 'page' : undefined} onClick={() => setTab('expenses')}>
+          Expenses
+        </button>
+        <button type="button" aria-current={tab === 'month' ? 'page' : undefined} onClick={() => setTab('month')}>
+          Month
+        </button>
+        <button type="button" aria-current={tab === 'categories' ? 'page' : undefined} onClick={() => setTab('categories')}>
+          Categories
+        </button>
+      </nav>
+      {/* Only the active page is mounted, so the others load their data again when shown.
+          This is also how category changes reach the expense form. */}
+      {tab === 'expenses' && <ExpensesPage />}
+      {tab === 'month' && <MonthReportPage />}
+      {tab === 'categories' && <CategoriesPage />}
     </main>
   )
 }

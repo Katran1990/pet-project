@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
@@ -15,5 +16,13 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test/setup.ts'],
+    // East of UTC on purpose: a "today" computed with toISOString() (the UTC date) fails localDate.test.ts and E1.
+    env: { TZ: 'Europe/Warsaw' },
+    unstubGlobals: true, // undo vi.stubGlobal('fetch', …) after each test
+    restoreMocks: true, // undo vi.spyOn(window, 'confirm') after each test
   },
 })

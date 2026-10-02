@@ -20,6 +20,10 @@ Rules:
 - Never weaken, disable or delete a failing test to get a green build.
 - Run the full suite at the end: `cd backend && ./gradlew test`
   (and frontend tests if they exist).
+- Git: read-only commands only (git status, git diff, git log). Never
+  commit, branch, checkout, push, stash, reset or otherwise change state.
+- Report honestly which commands you ran. A rule you had to break is
+  reported, not hidden.
 
 Return: tests added (file + what each proves), the exact test command output
 summary (passed / failed counts), and a list of failures with your diagnosis.

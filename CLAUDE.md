@@ -12,13 +12,28 @@
 
 ## Commands
 - Backend tests: cd backend && ./gradlew test
+- Frontend tests: cd frontend && npm test
+- Frontend build and lint: cd frontend && npm run build && npm run lint
+  (tsc -b in the build also type-checks the tests)
 - Run backend:   cd backend && ./gradlew bootRun   (port 8080)
 - Run frontend:  cd frontend && npm run dev         (port 5173)
+- After any change to backend dependencies, run
+  cd backend && ./gradlew dependencies --write-locks and commit
+  backend/gradle.lockfile, otherwise the build fails (dependency locking).
 
 ## Rules
 - No git operations unless I explicitly ask.
 - A task is not done until the tests pass.
 - Never hardcode secrets; use environment variables.
+- Prefer configuration and existing library features over custom code.
+- Money is BigDecimal in Java and a string with two decimals in JSON,
+  never float/double.
+- Table names are singular.
+- API errors are RFC 9457 Problem Details (application/problem+json);
+  validation errors add `errors: [{field, message}]`.
+- An empty string in an optional string field is normalised to null
+  in POST and PATCH. In PATCH, an omitted or null optional string
+  field means "leave unchanged", an empty string means "clear".
 
 ## Language
 - Everything in the repository is in English: code, comments, docs, config,
