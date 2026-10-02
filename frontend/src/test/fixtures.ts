@@ -1,6 +1,8 @@
 import type { Category } from '../api/categories.ts'
-import type { Expense, ExpenseList } from '../api/expenses.ts'
+import type { BudgetLimit } from '../api/budgetLimits.ts'
+import type { Expense, ExpenseCategory, ExpenseList } from '../api/expenses.ts'
 import type { QuickTemplate } from '../api/quickTemplates.ts'
+import type { CategoryReport, CategoryReportRow } from '../api/reports.ts'
 import { json } from './fetchMock.ts'
 import type { MockRoutes } from './fetchMock.ts'
 
@@ -61,4 +63,41 @@ export function list(
 ): ExpenseList {
   const { totalAmount, page = 0, size = 50, totalItems = items.length } = options
   return { items, page, size, totalItems, totalAmount }
+}
+
+export const reportRoute = (month: string) => `GET /api/reports/by-category?month=${month}`
+export const limitsRoute = (month: string) => `GET /api/budget-limits?month=${month}`
+export const LIMIT_PUT_ROUTE = 'PUT /api/budget-limits'
+export const limitDeleteRoute = (id: number) => `DELETE /api/budget-limits/${id}`
+
+// Exactly the backend's CategorySummary {id, name, icon}. A full Category (FOOD) would type-check
+// where an ExpenseCategory is expected, but the mocked payload would silently gain archived and createdAt.
+export function categorySummary(category: Category): ExpenseCategory {
+  return { id: category.id, name: category.name, icon: category.icon }
+}
+
+// share and remaining are never derived from other fields (AC5): a test that sets limit
+// also sets remaining explicitly.
+export function reportRow(overrides: Partial<CategoryReportRow> = {}): CategoryReportRow {
+  return {
+    category: categorySummary(FOOD),
+    amount: '10.00',
+    share: '100.0',
+    limit: null,
+    remaining: null,
+    ...overrides,
+  }
+}
+
+// totalAmount is a required string and is never summed from the rows (AC5).
+export function categoryReport(
+  month: string,
+  rows: CategoryReportRow[],
+  options: { totalAmount: string },
+): CategoryReport {
+  return { month, totalAmount: options.totalAmount, rows }
+}
+
+export function budgetLimit(overrides: Partial<BudgetLimit> = {}): BudgetLimit {
+  return { id: 1, month: '2026-10', amount: '100.00', category: categorySummary(FOOD), ...overrides }
 }

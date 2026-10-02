@@ -10,15 +10,15 @@ export type ErrorOutcome =
 
 const FORM_FIELDS = ['amount', 'categoryId', 'spentOn', 'note']
 
-const NETWORK_MESSAGE = 'Could not reach the server. Check your connection and try again.'
-const UNEXPECTED_MUTATION_MESSAGE = 'Unexpected error. Please try again.'
+export const NETWORK_MESSAGE = 'Could not reach the server. Check your connection and try again.'
+export const UNEXPECTED_MUTATION_MESSAGE = 'Unexpected error. Please try again.'
 const EXPENSE_GONE_MESSAGE = 'This expense no longer exists. The list has been refreshed.'
 
-function detailOrFallback(error: ApiError, status: number): string {
+export function detailOrFallback(error: ApiError, status: number): string {
   return error.detail ?? `request failed with status ${status}`
 }
 
-function serverErrorMessage(error: ApiError, status: number): string {
+export function serverErrorMessage(error: ApiError, status: number): string {
   return error.detail ? `Server error (${status}): ${error.detail}` : `Server error (${status})`
 }
 
@@ -113,9 +113,10 @@ const LOAD_ERROR_LABELS = {
   expenses: 'Could not load expenses',
   categories: 'Could not load categories',
   quickTemplates: 'Could not load quick templates',
+  report: 'Could not load the report',
 }
 
-export function describeLoadError(error: unknown, what: 'expenses' | 'categories' | 'quickTemplates'): string | null {
+export function describeLoadError(error: unknown, what: 'expenses' | 'categories' | 'quickTemplates' | 'report'): string | null {
   if (isAbortError(error)) {
     return null
   }
