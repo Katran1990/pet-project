@@ -64,7 +64,7 @@ function parseErrorBody(text: string, contentType: string): { detail: string | n
 }
 
 export async function request<T>(
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE',
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string,
   options?: { body?: unknown; signal?: AbortSignal },
 ): Promise<T> {

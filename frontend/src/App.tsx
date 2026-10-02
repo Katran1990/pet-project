@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import './App.css'
+import { CategoriesPage } from './category/CategoriesPage.tsx'
 import { ExpensesPage } from './expense/ExpensesPage.tsx'
 import { MonthReportPage } from './report/MonthReportPage.tsx'
 
-type Tab = 'expenses' | 'month'
+type Tab = 'expenses' | 'month' | 'categories'
 
 function App() {
   const [tab, setTab] = useState<Tab>('expenses')
@@ -16,9 +17,15 @@ function App() {
         <button type="button" aria-current={tab === 'month' ? 'page' : undefined} onClick={() => setTab('month')}>
           Month
         </button>
+        <button type="button" aria-current={tab === 'categories' ? 'page' : undefined} onClick={() => setTab('categories')}>
+          Categories
+        </button>
       </nav>
-      {/* Only the active page is mounted, so the other one reloads its data when shown again (decision 1). */}
-      {tab === 'expenses' ? <ExpensesPage /> : <MonthReportPage />}
+      {/* Only the active page is mounted, so the others load their data again when shown.
+          This is also how category changes reach the expense form. */}
+      {tab === 'expenses' && <ExpensesPage />}
+      {tab === 'month' && <MonthReportPage />}
+      {tab === 'categories' && <CategoriesPage />}
     </main>
   )
 }

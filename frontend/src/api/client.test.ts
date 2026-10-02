@@ -173,4 +173,18 @@ describe('client', () => {
     expect(error).toBe(abort)
   })
 
+  it('C13: PATCH sends method PATCH, Content-Type and a JSON body; a 200 returns the parsed body', async () => {
+    const mock = mockFetch({
+      'PATCH /api/things/1': json({ id: 1 }),
+    })
+
+    const result = await request<{ id: number }>('PATCH', '/api/things/1', { body: { icon: '' } })
+
+    expect(result).toEqual({ id: 1 })
+    // The raw method: fetch does not upper-case 'patch', and requests() would hide the case.
+    expect(mock.mock.calls[0][1]?.method).toBe('PATCH')
+    const [sent] = requests(mock)
+    expect(sent.headers.get('Content-Type')).toBe('application/json')
+    expect(sent.body).toEqual({ icon: '' })
+  })
 })
