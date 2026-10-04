@@ -104,6 +104,7 @@ by default, and the date of expenses created by `POST /api/quick-templates/{id}/
 | `DELETE` | `/api/quick-templates/{id}` | Deletes a template; expenses created from it are kept; 204, or 404 if unknown |
 | `POST` | `/api/quick-templates/{id}/apply` | Creates an expense dated today (APP_TIME_ZONE) with the template's amount and category; optional JSON body {"amount": "...", "note": "..."} overrides amount and note (a null or "" amount means no override; a body without Content-Type application/json is 415); 201 with the created expense (same body as POST /api/expenses); 409 if the template's category is archived |
 | `GET`  | `/actuator/health` | Application health           |
+| `GET`  | `/actuator/prometheus` | Metrics in the Prometheus text format (Micrometer), e.g. `http_server_requests_seconds`, `jvm_memory_used_bytes`; unauthenticated, intended for in-cluster scraping only (see "Deploy") |
 
 Errors are returned as RFC 9457 Problem Details (`application/problem+json`) with `type`, `title`, `status`, `detail` and `instance`. Validation errors (400) additionally contain `errors: [{"field": "...", "message": "..."}]`.
 
@@ -221,6 +222,17 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
   keeps writing to that branch. After that, nothing reads or writes it any
   more; it is kept as-is for history.
 - Add `dev.pet.local` / `pet.local` to `/etc/hosts` for the local k3d cluster.
+- Metrics: the Ingress and the frontend's nginx route only `/api/` to the
+  backend; `/actuator/prometheus` is meant to be scraped from inside the
+  cluster, where it is served without authentication at
+  `http://backend:8080/actuator/prometheus`. The backend Service has the label
+  `app: backend` and its port is named `http`, so a Prometheus Operator
+  `ServiceMonitor` can select it (`matchLabels: { app: backend }`,
+  `port: http`); the chart does not ship one. HTTP server timings are exported
+  as a histogram (`http_server_requests_seconds_bucket`, usable with
+  `histogram_quantile`), and every metric carries the tag `application="pet"`.
+  Locally the endpoint is at `http://localhost:8080/actuator/prometheus`; the
+  Vite dev server proxies only `/api`.
 - Postgres credentials are per-namespace SealedSecrets under
   `infra/helm/pet-project/sealed-secrets/<namespace>/`, and `envs/*/values.yaml`
   never holds credentials. See "Postgres credentials (Sealed Secrets)" below.

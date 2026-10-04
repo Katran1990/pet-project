@@ -48,8 +48,10 @@ apiVersion: v1
 kind: Service
 metadata:
   name: backend            # nginx.conf in the frontend proxies /api to http://backend:8080
+  labels: { app: backend } # selected by a Prometheus ServiceMonitor (spec.selector.matchLabels)
 spec:
   selector: { app: backend }
   ports:
-    - port: 8080
+    - name: http           # referenced by name from a Prometheus ServiceMonitor (endpoints[].port: http)
+      port: 8080
       targetPort: 8080
