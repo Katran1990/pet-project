@@ -116,20 +116,56 @@ jobs:
             helm lint infra/helm/pet-project --namespace "${env}" -f "deploy-values/envs/${env}/values.yaml"
           done
 
-      # Renders the chart exactly as Argo CD does (chart + envs/<env>/values.yaml).
-      # Output goes to /dev/null to keep the log short: postgres.yaml now renders a
-      # SealedSecret (ciphertext only, safe either way). `helm template` - not `helm
-      # lint` - is what actually enforces the sealed-file validation in postgres.yaml
-      # (its fail() checks): helm lint only logs them as INFO. Errors go to stderr and
-      # fail the step.
+      # Renders the chart as Argo CD does on a cluster where the ServiceMonitor CRD exists
+      # (chart + envs/<env>/values.yaml, plus --api-versions for the guarded ServiceMonitor),
+      # and checks that the ServiceMonitor shows up. The path without the CRD (no
+      # --api-versions) is covered by the helm lint steps above. The output is not printed:
+      # postgres.yaml renders a SealedSecret (ciphertext only, safe either way). `helm template`
+      # - not `helm lint` - is what actually enforces the sealed-file validation in
+      # postgres.yaml (its fail() checks): helm lint only logs them as INFO. Errors go to
+      # stderr and fail the step.
       - name: Render chart with dev and prod values
         run: |
           for env in dev prod; do
             echo "helm template with envs/${env}/values.yaml"
+            out="${RUNNER_TEMP}/pet-project-${env}.yaml"
             helm template "pet-project-${env}" infra/helm/pet-project \
               --namespace "${env}" \
-              -f "deploy-values/envs/${env}/values.yaml" > /dev/null
+              --api-versions monitoring.coreos.com/v1/ServiceMonitor \
+              -f "deploy-values/envs/${env}/values.yaml" > "${out}"
+            grep -qx 'kind: ServiceMonitor' "${out}" \
+              || { echo "::error::no ServiceMonitor rendered for ${env}"; exit 1; }
           done
+
+      # Renders kube-prometheus-stack as the "monitoring" Argo CD Application does: same chart
+      # version, release name and namespace as infra/argocd/apps.yaml, plus
+      # infra/monitoring/values.yaml. --repo fetches the packaged chart (subcharts included),
+      # so no `helm repo add` is needed. The yq checks (mikefarah yq v4, preinstalled on
+      # GitHub-hosted ubuntu-latest runners) fail the step unless apps.yaml pins the same chart
+      # version for the "monitoring" Application, its `ref: values` source has no `path`, and the
+      # "monitoring-secrets" Application applies infra/monitoring/sealed-secrets from main into
+      # namespace monitoring. Output goes to /dev/null: it is several thousand lines.
+      - name: Render kube-prometheus-stack with monitoring values
+        env:
+          KPS_VERSION: 91.9.0   # keep in sync with the "monitoring" Application in infra/argocd/apps.yaml
+        run: |
+          export KPS_VERSION
+          yq -e 'select(.metadata.name == "monitoring") | .spec.sources[]
+                 | select(.chart == "kube-prometheus-stack" and .targetRevision == strenv(KPS_VERSION))' \
+            infra/argocd/apps.yaml > /dev/null \
+            || { echo "::error::apps.yaml: Application monitoring must use chart kube-prometheus-stack at ${KPS_VERSION}"; exit 1; }
+          yq -e 'select(.metadata.name == "monitoring") | .spec.sources[]
+                 | select(.ref == "values" and .path == null)' infra/argocd/apps.yaml > /dev/null \
+            || { echo "::error::apps.yaml: the ref: values source of monitoring must have no path"; exit 1; }
+          yq -e 'select(.metadata.name == "monitoring-secrets") | .spec
+                 | select(.destination.namespace == "monitoring" and .source.path == "infra/monitoring/sealed-secrets" and .source.targetRevision == "main")' \
+            infra/argocd/apps.yaml > /dev/null \
+            || { echo "::error::apps.yaml: Application monitoring-secrets must apply infra/monitoring/sealed-secrets from main into namespace monitoring"; exit 1; }
+          helm template monitoring kube-prometheus-stack \
+            --repo https://prometheus-community.github.io/helm-charts \
+            --version "${KPS_VERSION}" \
+            --namespace monitoring \
+            -f infra/monitoring/values.yaml > /dev/null
 
   dependency-scan:
     name: Dependencies (Trivy)

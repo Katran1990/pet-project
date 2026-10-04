@@ -1,6 +1,6 @@
 # Argo CD Applications. Apply once by hand: kubectl apply -f infra/argocd/apps.yaml
 #
-# Each app has two sources:
+# pet-project-dev and pet-project-prod have two sources:
 #   1. the Helm chart from this repo (branch development for dev, main for prod)
 #   2. environment values from the deploy repo
 #      (https://github.com/Katran1990/pet-project-deploy.git, branch main), which CI
@@ -8,18 +8,30 @@
 #      Argo CD needs no repository credential (`argocd repo add`); making it private
 #      later would break the sync until a credential is added.
 #
-# The two sources deliberately point at different repositories: our Argo CD rejected a
-# multi-source app that referenced two revisions of the same repoURL, which is why the
-# environment values moved out of the `deploy` branch of this repo.
+# monitoring has two sources as well:
+#   1. the kube-prometheus-stack chart from the prometheus-community Helm repo
+#   2. this repo (branch main) as a pure `ref: values` source, which provides
+#      infra/monitoring/values.yaml (no `path`, so nothing else is rendered from it)
+#
+# monitoring-secrets has a single plain directory source: infra/monitoring/sealed-secrets in
+# this repo (branch main), which holds the Grafana admin SealedSecret. It is a separate
+# Application so that the chart app keeps the documented chart + `$values` pattern and the
+# SealedSecret applies independently of the chart sync.
+#
+# In every app the two sources deliberately point at different repositories: our Argo CD
+# rejected a multi-source app that referenced two revisions of the same repoURL, which is
+# why the environment values moved out of the `deploy` branch of this repo (and why this
+# repo appears only once per Application).
 # The sources are tied together by the ref name, not by the URL - the values source
 # declares `ref: values` and the chart source consumes it as
-# `$values/envs/<env>/values.yaml`. Keep that name and the `$values` prefix in sync.
+# `$values/<path to the values file>`. Keep that name and the `$values` prefix in sync.
 # Style: spell each repoURL the same way in the dev and the prod Application, so the
 # two obviously refer to the same pair of repositories.
 #
 # Prerequisite: the Sealed Secrets controller must be installed in the cluster
-# (README, "Postgres credentials (Sealed Secrets)"); without its CRD the sync fails
-# and nothing is applied.
+# (README, "Postgres credentials (Sealed Secrets)"); without its CRD the sync of the
+# pet-project apps and of monitoring-secrets (Grafana admin SealedSecret) fails and
+# nothing is applied.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -67,6 +79,68 @@ spec:
     - repoURL: https://github.com/Katran1990/pet-project-deploy.git
       targetRevision: main
       ref: values
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+---
+# Cluster monitoring: kube-prometheus-stack (Prometheus Operator, Prometheus, Grafana,
+# kube-state-metrics, node-exporter) in namespace "monitoring". One instance for the whole
+# cluster; it scrapes the backend in dev and prod through the ServiceMonitor in the
+# pet-project chart. See README "Monitoring (kube-prometheus-stack)".
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: 91.9.0     # pinned; CI renders the same version (.github/workflows/ci.yml, job "Helm chart")
+      helm:
+        releaseName: monitoring  # resource names derive from it; CI renders with the same name
+        valueFiles:
+          - $values/infra/monitoring/values.yaml
+    # This repo: `ref: values` only provides the values file above. No `path`: the Grafana
+    # admin SealedSecret is applied by the separate Application monitoring-secrets below.
+    - repoURL: https://github.com/Katran1990/pet-project.git
+      targetRevision: main
+      ref: values
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true   # the operator CRDs exceed the 256 KiB last-applied-configuration annotation limit
+---
+# Grafana admin SealedSecret for the monitoring app (kubeseal output, strict scope, namespace
+# "monitoring"). Separate from "monitoring" so that the chart app keeps the documented chart +
+# `$values` pattern and the SealedSecret applies independently of the chart sync.
+# If the file cannot be decrypted (wrong name/namespace, another controller key), Grafana waits
+# in CreateContainerConfigError for the Secret grafana-admin; the rest of the stack stays healthy.
+# Without the directory this app shows "app path does not exist"; monitoring still installs.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-secrets
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  source:
+    repoURL: https://github.com/Katran1990/pet-project.git
+    targetRevision: main
+    path: infra/monitoring/sealed-secrets
   syncPolicy:
     automated:
       prune: true
