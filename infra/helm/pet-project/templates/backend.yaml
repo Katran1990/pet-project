@@ -5,6 +5,8 @@ metadata:
   labels: { app: backend }
 spec:
   replicas: {{ .Values.backend.replicas }}
+  # rollbacks go through git and Argo CD; old ReplicaSets only clutter the Argo CD tree
+  revisionHistoryLimit: 3
   selector:
     matchLabels: { app: backend }
   template:
@@ -48,8 +50,28 @@ apiVersion: v1
 kind: Service
 metadata:
   name: backend            # nginx.conf in the frontend proxies /api to http://backend:8080
+  labels: { app: backend } # selected by the ServiceMonitor below (spec.selector.matchLabels)
 spec:
   selector: { app: backend }
   ports:
-    - port: 8080
+    - name: http           # referenced by name from the ServiceMonitor below (endpoints[].port: http)
+      port: 8080
       targetPort: 8080
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor" }}
+---
+# Scraped by the Prometheus of the "monitoring" Argo CD Application (kube-prometheus-stack),
+# which selects every ServiceMonitor in every namespace (infra/monitoring/values.yaml).
+# Rendered only when the ServiceMonitor CRD exists, so dev/prod still sync before monitoring
+# is installed (README "Monitoring (kube-prometheus-stack)").
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: backend
+  labels: { app: backend }
+spec:
+  selector:
+    matchLabels: { app: backend }   # the backend Service's label
+  endpoints:
+    - port: http                    # the backend Service's named port (8080)
+      path: /actuator/prometheus
+{{- end }}

@@ -5,6 +5,8 @@ metadata:
   labels: { app: frontend }
 spec:
   replicas: {{ .Values.frontend.replicas }}
+  # rollbacks go through git and Argo CD; old ReplicaSets only clutter the Argo CD tree
+  revisionHistoryLimit: 3
   selector:
     matchLabels: { app: frontend }
   template:

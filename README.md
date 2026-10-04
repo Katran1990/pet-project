@@ -104,6 +104,7 @@ by default, and the date of expenses created by `POST /api/quick-templates/{id}/
 | `DELETE` | `/api/quick-templates/{id}` | Deletes a template; expenses created from it are kept; 204, or 404 if unknown |
 | `POST` | `/api/quick-templates/{id}/apply` | Creates an expense dated today (APP_TIME_ZONE) with the template's amount and category; optional JSON body {"amount": "...", "note": "..."} overrides amount and note (a null or "" amount means no override; a body without Content-Type application/json is 415); 201 with the created expense (same body as POST /api/expenses); 409 if the template's category is archived |
 | `GET`  | `/actuator/health` | Application health           |
+| `GET`  | `/actuator/prometheus` | Metrics in the Prometheus text format (Micrometer), e.g. `http_server_requests_seconds`, `jvm_memory_used_bytes`; unauthenticated, intended for in-cluster scraping only (see "Deploy") |
 
 Errors are returned as RFC 9457 Problem Details (`application/problem+json`) with `type`, `title`, `status`, `detail` and `instance`. Validation errors (400) additionally contain `errors: [{"field": "...", "message": "..."}]`.
 
@@ -116,7 +117,11 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
 - `.github/workflows/ci.yml` runs on every PR: backend `./gradlew build`
   (compiles and runs tests), frontend lint, build and tests (`npm test`),
   `helm lint` and `helm template` of `infra/helm/pet-project` against the
-  `envs/dev` and `envs/prod` values from `pet-project-deploy@main`, a Trivy
+  `envs/dev` and `envs/prod` values from `pet-project-deploy@main` (the render
+  also runs with `--api-versions monitoring.coreos.com/v1/ServiceMonitor` and
+  checks that the ServiceMonitor is rendered), a `helm template` of
+  kube-prometheus-stack (version pinned in `apps.yaml`) with `infra/monitoring/values.yaml`
+  plus a yq check of the monitoring Applications, a Trivy
   dependency scan (see "Dependency vulnerability scanning (Trivy)" below),
   and actionlint over `.github/workflows/`. Run the same checks locally with
   `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color`
@@ -129,6 +134,14 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
   curl -fsSL https://raw.githubusercontent.com/Katran1990/pet-project-deploy/main/envs/dev/values.yaml -o /tmp/dev-values.yaml
   docker run --rm -v "$PWD:/apps" -v "/tmp:/vals" -w /apps alpine/helm:3.22.0 \
     template pet-project-dev infra/helm/pet-project -n dev -f /vals/dev-values.yaml > /dev/null
+  ```
+
+  The monitoring render needs no extra files:
+
+  ```bash
+  docker run --rm -v "$PWD:/apps" -w /apps alpine/helm:3.22.0 template monitoring kube-prometheus-stack \
+    --repo https://prometheus-community.github.io/helm-charts --version 91.9.0 \
+    --namespace monitoring -f infra/monitoring/values.yaml > /dev/null
   ```
 - `.github/workflows/build-images.yml` builds, scans (Trivy) and pushes
   `ghcr.io/<owner>/<repo>/backend:<tag>` and
@@ -202,11 +215,18 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
 
 - `infra/helm/pet-project` — the chart (backend, frontend, in-cluster
   Postgres, Ingress).
-- `infra/argocd/apps.yaml` — two Argo CD Applications (`pet-project-dev` ->
+- `infra/argocd/apps.yaml` — four Argo CD Applications (`pet-project-dev` ->
   namespace `dev` from branch `development`, `pet-project-prod` -> namespace
-  `prod` from branch `main`); applied once by hand with
-  `kubectl apply -f infra/argocd/apps.yaml`. Each app has two sources: the
-  chart from this repo and the environment values from the deploy repo.
+  `prod` from branch `main`, `monitoring` -> namespace `monitoring`: the
+  kube-prometheus-stack chart from the prometheus-community Helm repo with its
+  values from this repo's `main`, and `monitoring-secrets` -> the Grafana admin
+  SealedSecret from `infra/monitoring/sealed-secrets` on `main`); applied
+  once by hand with `kubectl apply -f infra/argocd/apps.yaml`. Each
+  pet-project app has two sources: the chart from this repo and the
+  environment values from the deploy repo. See "Monitoring
+  (kube-prometheus-stack)" below.
+- The backend and frontend Deployments keep only 3 old ReplicaSets
+  (`revisionHistoryLimit: 3`); rollbacks go through git and Argo CD.
 - Environment values live in a separate repository,
   `https://github.com/Katran1990/pet-project-deploy` (branch `main`, files
   `envs/dev/values.yaml` and `envs/prod/values.yaml`). They were moved out of
@@ -220,7 +240,20 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
   workflow file from the default branch, so until then the old workflow
   keeps writing to that branch. After that, nothing reads or writes it any
   more; it is kept as-is for history.
-- Add `dev.pet.local` / `pet.local` to `/etc/hosts` for the local k3d cluster.
+- Add `dev.pet.local` / `pet.local` / `grafana.pet.local` to `/etc/hosts` for the local k3d cluster.
+- Metrics: the Ingress and the frontend's nginx route only `/api/` to the
+  backend; `/actuator/prometheus` is meant to be scraped from inside the
+  cluster, where it is served without authentication at
+  `http://backend:8080/actuator/prometheus`. The backend Service has the label
+  `app: backend` and its port is named `http`, so a Prometheus Operator
+  `ServiceMonitor` can select it (`matchLabels: { app: backend }`,
+  `port: http`); the chart ships ServiceMonitor `backend` (port `http`, path
+  `/actuator/prometheus`), rendered only when the ServiceMonitor CRD exists
+  in the cluster. HTTP server timings are exported
+  as a histogram (`http_server_requests_seconds_bucket`, usable with
+  `histogram_quantile`), and every metric carries the tag `application="pet"`.
+  Locally the endpoint is at `http://localhost:8080/actuator/prometheus`; the
+  Vite dev server proxies only `/api`.
 - Postgres credentials are per-namespace SealedSecrets under
   `infra/helm/pet-project/sealed-secrets/<namespace>/`, and `envs/*/values.yaml`
   never holds credentials. See "Postgres credentials (Sealed Secrets)" below.
@@ -507,3 +540,153 @@ the controller, in this order:
 Applying the backup after the controller has already generated a fresh key
 is not enough on its own: restart the controller (step 2) so it re-reads the
 key Secrets.
+
+## Monitoring (kube-prometheus-stack)
+
+### What is installed and what is not
+
+The Argo CD Application `monitoring` installs the
+[kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack)
+chart (version pinned as `targetRevision` in `infra/argocd/apps.yaml`) into
+namespace `monitoring`. Values: `infra/monitoring/values.yaml`. The Grafana
+admin SealedSecret is applied by a separate Application, `monitoring-secrets`.
+
+- Installed: Prometheus Operator, Prometheus (retention 15d, at most 18GiB,
+  20Gi PVC), Grafana, kube-state-metrics, node-exporter, the default rules and
+  dashboards.
+- Not installed: Alertmanager (alerting is a later card) and the scrapers of
+  kube-controller-manager, kube-scheduler, kube-proxy and etcd (k3s runs them
+  inside its own process, so the chart's Services would have no targets).
+- Prometheus selects every ServiceMonitor in every namespace, not only those
+  labelled `release=monitoring`. The backend's ServiceMonitor comes from the
+  pet-project chart (namespaces `dev` and `prod`).
+- Sizing (no CPU limits, like the pet-project chart):
+
+  | Component | Requests | Memory limit |
+  |---|---|---|
+  | Prometheus | 200m / 1Gi | 2Gi |
+  | Prometheus Operator | 50m / 96Mi | 192Mi |
+  | Grafana | 50m / 256Mi | 512Mi |
+  | Grafana sidecars (each) | 10m / 96Mi | 192Mi |
+  | kube-state-metrics | 10m / 64Mi | 128Mi |
+  | node-exporter | 10m / 32Mi | 64Mi |
+
+- The app syncs with `ServerSideApply=true`: the operator CRDs are larger than
+  the 256 KiB limit of the `last-applied-configuration` annotation. Argo CD
+  (not Helm) applies and updates the CRDs on every sync.
+
+### First install
+
+1. The Sealed Secrets controller must be installed (see "Postgres credentials
+   (Sealed Secrets)" above).
+2. Seal the Grafana admin credentials (next subsection) and commit
+   `infra/monitoring/sealed-secrets/grafana-admin.yaml`.
+3. After the change has reached `main`, run
+   `kubectl apply -f infra/argocd/apps.yaml`. This creates `monitoring` and
+   `monitoring-secrets` and leaves the other two apps unchanged.
+4. Until `main` has `infra/monitoring/`, both apps show "app path does not
+   exist" or a values-file error. This is expected and harmless.
+   Check the secret with `kubectl -n argocd get application monitoring-secrets`
+   and `kubectl -n monitoring get sealedsecret grafana-admin` (`Synced=True`).
+5. The pet-project apps pick up the ServiceMonitor once the CRD exists (see
+   "Troubleshooting" below).
+
+### Grafana admin credentials (Sealed Secret)
+
+The Grafana admin user and password come from the Secret `grafana-admin`
+(keys `admin-user` and `admin-password`), created by a SealedSecret in
+`infra/monitoring/sealed-secrets/grafana-admin.yaml`. The Argo CD Application
+`monitoring-secrets` (a plain directory source on this repo's `main`) applies
+it, independently of the chart sync of `monitoring`. Never put the password in `values.yaml`. Seal it with the same
+pattern as the Postgres credentials (temporary file plus `mv`, `pipefail`,
+the password only in a variable and on stdin):
+
+```bash
+OUT="infra/monitoring/sealed-secrets/grafana-admin.yaml"
+mkdir -p "$(dirname "$OUT")"
+PW="$(openssl rand -hex 24)"
+( set -o pipefail
+  printf %s "$PW" \
+  | kubectl create secret generic grafana-admin --namespace monitoring \
+      --from-literal=admin-user=admin --from-file=admin-password=/dev/stdin \
+      --dry-run=client -o yaml \
+  | kubeseal --format yaml \
+  > "$OUT.tmp"
+) && mv "$OUT.tmp" "$OUT" || rm -f "$OUT.tmp"
+```
+
+- Strict scope (the `kubeseal` default): name `grafana-admin`, namespace
+  `monitoring`. The namespace does not need to exist for sealing.
+- The offline `--cert` variant from "Seal credentials for dev and prod" works
+  here too.
+- Commit only the `kubeseal` output, never the plain Secret.
+- The file must exist on `main`: without the directory `monitoring-secrets`
+  shows "app path does not exist"; `monitoring` still installs, and Grafana
+  waits in `CreateContainerConfigError` for the Secret `grafana-admin`. The
+  same happens if the file cannot be decrypted (wrong name or namespace,
+  another controller key). Do not add a `.gitkeep` there.
+- Rotation:
+  1. Re-seal and merge until the change reaches `main`.
+  2. Wait until `kubectl -n monitoring get sealedsecret grafana-admin` shows
+     `Synced=True`.
+  3. Run `kubectl -n monitoring rollout restart deployment/monitoring-grafana`.
+  4. The restart is enough because Grafana has no persistent volume: a new pod
+     creates its database from scratch and applies the user and password from
+     the Secret. The flip side is that users, preferences and dashboards edited
+     in the UI are lost on every restart. The chart does not restart Grafana
+     when the Secret changes, so step 3 is always required.
+
+### Reach Grafana
+
+Add `127.0.0.1 grafana.pet.local` to `/etc/hosts`, then open
+`http://grafana.pet.local` (the same Traefik entry point as `dev.pet.local`).
+The user is `admin`. The password is in your password manager, or read it with:
+
+```bash
+kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d; echo
+```
+
+The Prometheus datasource is provisioned automatically.
+
+### Check the backend targets in Prometheus
+
+```bash
+kubectl -n monitoring port-forward svc/monitoring-kube-prometheus-prometheus 9090:9090
+```
+
+Open `http://localhost:9090/targets?search=backend`. Expect the pools
+`serviceMonitor/dev/backend/0` and `serviceMonitor/prod/backend/0`, one target
+per backend pod, State `UP`. In the query UI:
+
+- `up{job="backend"}` returns one series per pod, value `1`, label
+  `namespace` = `dev` or `prod`.
+- `sum by (namespace) (rate(http_server_requests_seconds_count{application="pet"}[5m]))`
+  shows traffic.
+
+The same queries work in Grafana, Explore.
+
+### Troubleshooting
+
+- No pool for a namespace: run `kubectl -n <env> get servicemonitor backend`.
+  If it is missing, the app's manifests were rendered before the CRD existed.
+  Hard-refresh the app: `argocd app get pet-project-<env> --hard-refresh`, or
+  in the UI Refresh, then Hard Refresh. The ServiceMonitor is rendered only
+  when the cluster has the `monitoring.coreos.com/v1/ServiceMonitor` CRD, so
+  dev and prod still sync before monitoring is installed.
+- Pool with 0 targets: check that the Service has the label `app: backend` and
+  the port is named `http`.
+- Target DOWN: `kubectl -n <env> exec deploy/backend -- wget -qO- localhost:8080/actuator/prometheus | head`.
+  Only if the image has no `wget`, use a `kubectl run` curl pod in the same
+  namespace instead.
+
+### Upgrading the chart
+
+The chart version appears in exactly these places (check with
+`grep -rn "91\.9\.0" . --exclude-dir=docs --exclude-dir=node_modules`):
+
+- `targetRevision` of the `monitoring` Application in `infra/argocd/apps.yaml`;
+- `KPS_VERSION` in `.github/workflows/ci.yml`;
+- `--version` in the local render command under "CI and Docker images" above.
+
+Bump all three together; CI fails if the first two differ. For major versions
+read the upstream `UPGRADE.md` first.

@@ -1,0 +1,82 @@
+# Values for the "monitoring" Argo CD Application (infra/argocd/apps.yaml):
+# prometheus-community/kube-prometheus-stack (version: targetRevision in apps.yaml), release
+# "monitoring", namespace "monitoring".
+# Rendered in CI by .github/workflows/ci.yml (job "Helm chart").
+# The server has 14 GB RAM shared with the app: every component gets requests and a memory
+# limit (no CPU limits, like infra/helm/pet-project/values.yaml), and unused parts are off.
+# Never put a password here. Grafana's admin credentials come from the SealedSecret
+# infra/monitoring/sealed-secrets/grafana-admin.yaml (README "Monitoring (kube-prometheus-stack)").
+
+# Alerting is a separate card. Without Alertmanager, Prometheus gets no alerting section.
+alertmanager:
+  enabled: false
+
+# k3s (k3d) runs these inside the k3s process, bound to localhost: the chart's Services would
+# select no pods, leaving empty targets and permanently true "...Down" rules.
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
+
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    # Safety net under the 20Gi volume: k3d's local-path volumes do not enforce their size,
+    # so this is what caps disk usage (oldest blocks are deleted first).
+    retentionSize: 18GiB
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+    resources:
+      requests: { cpu: 200m, memory: 1Gi }
+      limits:   { memory: 2Gi }
+    # Select every ServiceMonitor (serviceMonitorNamespaceSelector stays {} = all namespaces),
+    # not only those labelled release=monitoring: the backend's ServiceMonitor lives in the
+    # pet-project chart (namespaces dev and prod) and must not depend on this release name.
+    serviceMonitorSelectorNilUsesHelmValues: false
+
+prometheusOperator:
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits:   { memory: 192Mi }
+
+grafana:
+  enabled: true
+  admin:
+    existingSecret: grafana-admin   # SealedSecret, see the header; keys below
+    userKey: admin-user
+    passwordKey: admin-password
+  ingress:
+    enabled: true
+    hosts:
+      - grafana.pet.local           # add to /etc/hosts like dev.pet.local (README)
+    path: /
+  resources:
+    requests: { cpu: 50m, memory: 256Mi }
+    limits:   { memory: 512Mi }
+  sidecar:
+    # Applies to each sidecar container (dashboards and datasources)
+    resources:
+      requests: { cpu: 10m, memory: 96Mi }
+      limits:   { memory: 192Mi }
+    datasources:
+      alertmanager:
+        enabled: false              # rendered even with alertmanager.enabled=false otherwise
+
+kube-state-metrics:
+  resources:
+    requests: { cpu: 10m, memory: 64Mi }
+    limits:   { memory: 128Mi }
+
+prometheus-node-exporter:
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits:   { memory: 64Mi }
