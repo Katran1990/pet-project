@@ -2,6 +2,7 @@
 
 Date: 2026-09-21
 Status: accepted
+Amended: 2026-10-05 for the self-hosted runner (ADR 0021); the amendment is proposed until merged.
 
 ## Context
 A broken Helm chart or workflow used to surface only at deploy time. The draft workflows
@@ -19,12 +20,27 @@ repo token has write access to what Argo CD deploys to `prod`.
     tag lookup alone.
   - Tool images are pinned by tag and digest (`rhysd/actionlint:1.7.12@sha256:...`,
     `aquasec/trivy`).
-  - Tool versions are explicit: Helm `v3.22.0` (never floating to Helm 4), actionlint
-    1.7.x, the Trivy binary through the action's `version:` input. This clarifies the rule:
-    CLI tools preinstalled on the GitHub-hosted runner image (jq, yq, kubectl with its
-    embedded kustomize) may be used in validation steps without separate pinning, because
-    the runner image versions them; anything the workflow installs or downloads itself must
-    be pinned.
+  - Every tool a job runs is installed by an explicit, version-pinned step in that job
+    (mandatory since the amendment of 2026-10-05). The step is one of:
+    - a setup action with a pinned version input (`setup-java`, `setup-node`,
+      `azure/setup-helm`, `trivy-action` `version:`, `setup-buildx-action` `version:`);
+    - a container image pinned by tag and digest (actionlint, BuildKit);
+    - a direct download of a release binary pinned by version and verified against a SHA-256
+      committed in the workflow, taken from the publisher's checksum file (yq, jq, kustomize).
+  - Language runtimes are pinned to an exact patch (Java: the patch line, which resolves to the
+    newest build of it).
+  - Nothing preinstalled on a runner may be relied on, except the host baseline in README
+    "CI runner" (bash, coreutils, grep, git >= 2.32, curl, ca-certificates, tar/gzip/xz,
+    Docker Engine). The same rule applies on GitHub-hosted and self-hosted runners.
+  - Tool versions (as of 2026-10-05): Helm `v3.22.0` (never floating to Helm 4), actionlint
+    1.7.12, Trivy v0.70.0 through the action's `version:` input, Java Temurin `25.0.4`
+    (resolves to jdk-25.0.4.1+1), Node `24.21.0`, yq `v4.54.1`, jq `1.8.2`, kustomize
+    `v5.6.0`, docker/buildx `v0.37.2`, moby/buildkit `v0.33.1`
+    (`sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea`).
+  - Where the pins live: `ci.yml` (`setup-java`/`setup-node` versions, the workflow `env`
+    block with yq, jq and kustomize versions and checksums, `setup-helm`, Trivy, actionlint),
+    `build-images.yml` (buildx and BuildKit), `update-deploy.yml` (yq, same values as
+    `ci.yml`) and the README's local commands.
   - Every tag is checked to exist before it is committed.
 - **Infrastructure checks in `ci.yml`** (separate parallel jobs, on every PR and push):
   - `helm`: `helm lint`, then lint and `helm template` for `dev` and `prod` with
@@ -48,6 +64,8 @@ repo token has write access to what Argo CD deploys to `prod`.
 - `helm lint --strict`: not added; it does not catch an invalid sealed file anyway
   (ADR 0005).
 - Excluding files from actionlint: would hide real issues.
+- Relying on tools preinstalled on `ubuntu-latest`: they are missing on the bare self-hosted
+  runner and their versions float.
 
 ## Consequences
 - A PR can go red because of a change in the deploy repo alone, since it renders against
@@ -57,4 +75,6 @@ repo token has write access to what Argo CD deploys to `prod`.
   every place it appears (workflows, README commands).
 - Later jobs follow the same pattern: Trivy (ADR 0007), the kube-prometheus-stack render
   and version-parity check (ADR 0019), the dashboards check (ADR 0020).
+- Adding a tool means adding an install step with version and checksum. A bump updates the
+  version and the checksum together, in every workflow that installs it.
 - Making these checks required is a manual branch-protection setting.

@@ -124,9 +124,10 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
   plus a yq check of the monitoring Applications (`monitoring`, `monitoring-secrets`
   and `monitoring-dashboards`), the `dashboards` job (every
   `infra/monitoring/dashboards/*.json` is valid JSON with a `uid` and a `title`, has no
-  grafana.com import inputs, and `kubectl kustomize` renders it into a labelled ConfigMap),
+  grafana.com import inputs, and `kustomize` (pinned v5.6.0) renders it into a labelled ConfigMap),
   a Trivy dependency scan (see "Dependency vulnerability scanning (Trivy)" below),
-  and actionlint over `.github/workflows/`. Run the same checks locally with
+  and actionlint over `.github/workflows/`. All jobs run on the self-hosted runner; see
+  "CI runner" below. Run the same checks locally with
   `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color`
   and `docker run --rm -v "$PWD:/apps" -w /apps alpine/helm:3.22.0 lint infra/helm/pet-project --namespace dev`.
   The `helm template` check additionally needs the `envs/dev` and
@@ -157,9 +158,10 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
   `ghcr.io/<owner>/<repo>/backend:<tag>` and
   `ghcr.io/<owner>/<repo>/frontend:<tag>` on push to `development`/`main`,
   tagged with the branch name and the commit SHA. Each image is scanned
-  before it is pushed; a failed scan blocks the push of that image. The two
-  images build in parallel with fail-fast, so one may already have been
-  pushed by the time the other's scan fails.
+  before it is pushed; a failed scan blocks the push of that image. On one
+  runner the two images build one after the other, and with fail-fast a failing
+  first leg cancels the queued second one; with two runners they build in
+  parallel and one may already have been pushed when the other's scan fails.
 - Build the images locally:
 
   ```bash
@@ -220,6 +222,49 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
 
   The repo is mounted at `/repo` (Trivy's working directory) so `.trivyignore` at the
   repository root is picked up the same way it is in CI.
+
+## CI runner
+
+- **Where it runs:** a self-hosted GitHub Actions runner on a home machine, labels
+  `self-hosted` and `home`. It runs every job of `ci.yml`, `build-images.yml` and
+  `update-deploy.yml`. Pull requests from forks, from a deleted fork and from Dependabot run
+  `ci.yml` on GitHub-hosted `ubuntu-latest` instead (the `runs-on` expression). Own-branch
+  PRs and pushes use the self-hosted runner. Decision and trust boundaries:
+  [ADR 0021](docs/adr/0021-self-hosted-ci-runner.md).
+- **Fork PRs:** the repository setting "Require approval for all external contributors"
+  (Settings, Actions, General, Fork pull request workflows) is already enabled. A fork PR
+  can edit the workflow files, including `runs-on`, so before approving a run, check its
+  changes under `.github/`.
+- **Host baseline:** Ubuntu LTS on x86_64, the runner as a systemd service under a dedicated
+  non-root user, Docker Engine (rootful, the runner user in the `docker` group; Testcontainers
+  needs the Docker socket), git >= 2.32, bash, coreutils, grep, curl, ca-certificates, tar,
+  gzip and xz-utils. Everything else is installed by the jobs with pinned versions; the
+  list of pins is in [ADR 0006](docs/adr/0006-ci-validation-and-pinning.md).
+- **Restart the service:** in the runner directory, `sudo ./svc.sh status`,
+  `sudo ./svc.sh stop`, `sudo ./svc.sh start`. Or use
+  `sudo systemctl restart actions.runner.<owner>-<repo>.<runner-name>.service`. Jobs wait in
+  "Waiting for a runner..." while the service is down. Fork and Dependabot PRs are not
+  affected.
+- **Disk space and `docker system prune`:** the host keeps Docker images (base images, the
+  Testcontainers `postgres:17` and Ryuk images, built images), the BuildKit cache, the tool
+  cache (`_work/_tool`), `~/.gradle` and `~/.npm`.
+  - `docker system prune` removes stopped containers, dangling images, unused networks and
+    the build cache.
+  - `docker system prune -a` also removes cached base images, so the next runs pull them
+    again from Docker Hub, which rate-limits anonymous pulls per IP.
+  - Only prune when no job is running: stop the service first. `-a` can delete an image that
+    "Build images" has built but not yet pushed.
+- **Persistent state:** `clean: true` removes untracked and changed files but keeps
+  `.git/config` and `.git/hooks` (ADR 0021), which is why "Build images" and
+  `update-deploy.yml` empty the workspace before their checkout; `update-deploy.yml` also
+  deletes its working copy and checkout credentials at the end. Everything else on the host
+  persists between jobs: the runner user's whole home directory (`~/.gradle`, `~/.npm`,
+  `~/.gitconfig`, `~/.docker/`, `~/.local/`), `_work/_tool`, and Docker images, volumes and
+  build cache. Any job can change these, and later jobs use them, including "Build images"
+  (GHCR push token) and "Update deploy manifests" (`DEPLOY_REPO_TOKEN`). This is an accepted
+  risk with two mitigations, git config isolation in `update-deploy.yml` and Dependabot PRs on
+  `ubuntu-latest`; see ADR 0021 "Trust boundaries". To reset it, stop the service, wipe the
+  runner user's home caches and `_work/_tool`, and prune Docker.
 
 ## Deploy (Helm + Argo CD)
 
