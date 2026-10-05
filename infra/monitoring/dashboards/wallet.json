@@ -1,0 +1,297 @@
+{
+  "uid": "wallet",
+  "title": "Wallet",
+  "tags": [
+    "pet-project"
+  ],
+  "editable": false,
+  "schemaVersion": 39,
+  "version": 1,
+  "description": "Monthly spending by category for the month chosen in the Month variable (last 12 months in Europe/Warsaw, default: the current month). The only query is backend/src/main/resources/db/report/by-category.sql (the SQL of GET /api/reports/by-category) with :month replaced by the month variable; the other panels reuse its result. Shows all data (single user), read from prod Postgres as the read-only role grafana_reader.",
+  "time": {
+    "from": "now/M",
+    "to": "now/M"
+  },
+  "timepicker": {
+    "hidden": true
+  },
+  "refresh": "",
+  "templating": {
+    "list": [
+      {
+        "name": "month",
+        "label": "Month",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "wallet-postgres"
+        },
+        "query": "select to_char(m, 'YYYY-MM') as __text, to_char(m, 'YYYY-MM-DD') as __value\nfrom generate_series(date_trunc('month', now() at time zone 'Europe/Warsaw') - interval '11 months',\n                     date_trunc('month', now() at time zone 'Europe/Warsaw'),\n                     interval '1 month') as g(m)\norder by m desc",
+        "refresh": 1,
+        "sort": 0,
+        "multi": false,
+        "includeAll": false,
+        "allowCustomValue": false,
+        "hide": 0,
+        "current": {},
+        "options": [],
+        "regex": ""
+      }
+    ]
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Total spent in ${month:text}",
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "firstNotNull"
+          ],
+          "fields": "/^total_amount$/"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyPLN",
+          "decimals": 2,
+          "noValue": "0.00"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "type": "barchart",
+      "title": "Spend by category in ${month:text}",
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Dashboard --"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 18,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "datasource",
+            "uid": "-- Dashboard --"
+          },
+          "panelId": 1
+        }
+      ],
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "category_name",
+                "amount"
+              ]
+            }
+          }
+        }
+      ],
+      "options": {
+        "xField": "category_name",
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyPLN",
+          "decimals": 2
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Limit vs actual",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "wallet-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 24,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "wallet-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "rawSql": "-- Monthly report by category.\n-- Used by GET /api/reports/by-category (CategoryReportRepository) and as the source of the\n-- first Grafana panel, which substitutes its own month expression for the month parameter.\n-- Parameter month: the first day of the month (a date).\n-- One row per category that has expenses and/or a limit in that month, sorted by amount desc,\n-- then category id. Money keeps scale 2; share is the percent of the month total with scale 1,\n-- 0.0 when the total is zero.\nwith params as (\n    select cast(${month:sqlstring} as date) as first_day\n),\nspent as (\n    select e.category_id, sum(e.amount) as amount\n    from expense e\n    cross join params p\n    where e.spent_on >= p.first_day\n      and e.spent_on < cast(p.first_day + interval '1 month' as date)\n    group by e.category_id\n),\nmonth_limit as (\n    select l.category_id, l.amount\n    from budget_limit l\n    cross join params p\n    where l.month = p.first_day\n),\ncombined as (\n    select coalesce(s.category_id, ml.category_id) as category_id,\n           coalesce(s.amount, 0.00)                as amount,\n           ml.amount                               as limit_amount\n    from spent s\n    full outer join month_limit ml on ml.category_id = s.category_id\n)\nselect c.id                      as category_id,\n       c.name                    as category_name,\n       c.icon                    as category_icon,\n       x.amount,\n       coalesce(round(100 * x.amount / nullif(sum(x.amount) over w, 0), 1), 0.0) as share,\n       x.limit_amount,\n       x.limit_amount - x.amount as remaining,\n       sum(x.amount) over w      as total_amount\nfrom combined x\njoin category c on c.id = x.category_id\nwindow w as ()\norder by x.amount desc, c.id"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "category_id": true,
+              "category_icon": true,
+              "total_amount": true
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "category_name"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Category"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "amount"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Spent"
+              },
+              {
+                "id": "unit",
+                "value": "currencyPLN"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "share"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Share"
+              },
+              {
+                "id": "unit",
+                "value": "percent"
+              },
+              {
+                "id": "decimals",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "limit_amount"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Limit"
+              },
+              {
+                "id": "unit",
+                "value": "currencyPLN"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "remaining"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Remaining"
+              },
+              {
+                "id": "unit",
+                "value": "currencyPLN"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              },
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-text"
+                }
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red",
+                      "value": null
+                    },
+                    {
+                      "color": "green",
+                      "value": 0
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

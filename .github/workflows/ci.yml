@@ -1,6 +1,6 @@
 # CI: runs on every pull request and on every push to development / main.
-# Five independent jobs (backend, frontend, the Helm chart check, actionlint and the
-# Trivy dependency scan) run in parallel.
+# Six independent jobs (backend, frontend, the Helm chart check, the Grafana dashboards check,
+# actionlint and the Trivy dependency scan) run in parallel.
 name: CI
 
 on:
@@ -144,7 +144,9 @@ jobs:
       # GitHub-hosted ubuntu-latest runners) fail the step unless apps.yaml pins the same chart
       # version for the "monitoring" Application, its `ref: values` source has no `path`, and the
       # "monitoring-secrets" Application applies infra/monitoring/sealed-secrets from main into
-      # namespace monitoring. Output goes to /dev/null: it is several thousand lines.
+      # namespace monitoring, and the "monitoring-dashboards" Application applies
+      # infra/monitoring/dashboards from main into namespace monitoring. Output goes to
+      # /dev/null: it is several thousand lines.
       - name: Render kube-prometheus-stack with monitoring values
         env:
           KPS_VERSION: 91.9.0   # keep in sync with the "monitoring" Application in infra/argocd/apps.yaml
@@ -161,11 +163,56 @@ jobs:
                  | select(.destination.namespace == "monitoring" and .source.path == "infra/monitoring/sealed-secrets" and .source.targetRevision == "main")' \
             infra/argocd/apps.yaml > /dev/null \
             || { echo "::error::apps.yaml: Application monitoring-secrets must apply infra/monitoring/sealed-secrets from main into namespace monitoring"; exit 1; }
+          yq -e 'select(.metadata.name == "monitoring-dashboards") | .spec
+                 | select(.destination.namespace == "monitoring" and .source.path == "infra/monitoring/dashboards" and .source.targetRevision == "main")' \
+            infra/argocd/apps.yaml > /dev/null \
+            || { echo "::error::apps.yaml: Application monitoring-dashboards must apply infra/monitoring/dashboards from main into namespace monitoring"; exit 1; }
           helm template monitoring kube-prometheus-stack \
             --repo https://prometheus-community.github.io/helm-charts \
             --version "${KPS_VERSION}" \
             --namespace monitoring \
             -f infra/monitoring/values.yaml > /dev/null
+
+  dashboards:
+    name: Grafana dashboards
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      # jq, yq (mikefarah v4) and kubectl are preinstalled on GitHub-hosted ubuntu-latest runners,
+      # so no extra action. Each dashboard must be valid JSON with a uid and a title, and must not
+      # carry grafana.com import inputs (__inputs / ${DS_...}): the Grafana sidecar does not resolve
+      # them. The jq program is in single quotes, so the shell never expands the "${DS_" in it, and
+      # shellcheck's SC2016 ("expressions don't expand in single quotes") exempts jq programs.
+      - name: Validate dashboard JSON
+        run: |
+          shopt -s nullglob
+          files=(infra/monitoring/dashboards/*.json)
+          [ "${#files[@]}" -gt 0 ] || { echo "::error::no dashboards in infra/monitoring/dashboards"; exit 1; }
+          for f in "${files[@]}"; do
+            jq -e '(.uid | type == "string" and length > 0)
+                   and (.title | type == "string" and length > 0)
+                   and (has("__inputs") | not)
+                   and ([.. | strings | select(contains("${DS_"))] | length == 0)' "$f" > /dev/null \
+              || { echo "::error file=${f}::invalid JSON, missing uid/title, or unresolved import inputs"; exit 1; }
+          done
+          dup="$(jq -r .uid "${files[@]}" | sort | uniq -d)"
+          [ -z "${dup}" ] || { echo "::error::duplicate dashboard uid(s): ${dup}"; exit 1; }
+
+      # Renders the ConfigMaps exactly as Argo CD does (kustomize) and checks that every JSON file
+      # ends up in a ConfigMap in namespace monitoring with the sidecar label grafana_dashboard=1.
+      - name: Render dashboard ConfigMaps (kustomize)
+        run: |
+          out="${RUNNER_TEMP}/dashboards.yaml"
+          kubectl kustomize infra/monitoring/dashboards > "${out}"
+          for f in infra/monitoring/dashboards/*.json; do
+            NAME="$(basename "${f}")" yq -e 'select(.kind == "ConfigMap" and .metadata.namespace == "monitoring"
+                   and .metadata.labels.grafana_dashboard == "1" and (.data | has(strenv(NAME))))' "${out}" > /dev/null \
+              || { echo "::error file=${f}::not rendered into a labelled ConfigMap (kustomization.yaml)"; exit 1; }
+          done
 
   dependency-scan:
     name: Dependencies (Trivy)
