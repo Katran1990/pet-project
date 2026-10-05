@@ -1,0 +1,5 @@
+# Custom label of the self-hosted runner (ADR 0021); without this actionlint reports
+# 'label "home" is unknown' for runs-on: [self-hosted, home].
+self-hosted-runner:
+  labels:
+    - home

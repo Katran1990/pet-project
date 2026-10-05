@@ -31,11 +31,15 @@ import org.springframework.test.web.servlet.client.RestTestClient;
 import static org.assertj.core.api.Assertions.assertThat;
 
 // Shares the cached Spring Boot test context and Postgres container with CategoryControllerIT,
-// GreetingControllerIT, ApiExceptionHandlerIT and BudgetLimitControllerIT (no @TestBean here).
+// GreetingControllerIT, ApiExceptionHandlerIT, BudgetLimitControllerIT, GrafanaReaderRoleIT and
+// WalletDashboardSqlIT (no @TestBean here).
 // This class owns the following months in the shared database, and no other IT in this context
 // must write expenses/limits into them:
 // 2016-01, 2016-02, 2016-03, 2017-01, 2017-02, 2017-03, 2017-04, 2017-05, 2017-06, 2017-07,
 // 2017-08, 2017-09, 2017-10, 2017-11, 2017-12 and 2099-12.
+// Other owners in this context: WalletDashboardSqlIT owns 2018-01; BudgetLimitControllerIT uses
+// 2020-01, 2030-01 to 2030-06, 2030-08, 2030-09, 2031-01, 2031-02, 2031-05 (data), 2031-03
+// (GET only) and 2039-01 to 2039-06.
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class ReportControllerIT {

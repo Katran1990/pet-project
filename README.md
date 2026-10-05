@@ -121,9 +121,13 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
   also runs with `--api-versions monitoring.coreos.com/v1/ServiceMonitor` and
   checks that the ServiceMonitor is rendered), a `helm template` of
   kube-prometheus-stack (version pinned in `apps.yaml`) with `infra/monitoring/values.yaml`
-  plus a yq check of the monitoring Applications, a Trivy
-  dependency scan (see "Dependency vulnerability scanning (Trivy)" below),
-  and actionlint over `.github/workflows/`. Run the same checks locally with
+  plus a yq check of the monitoring Applications (`monitoring`, `monitoring-secrets`
+  and `monitoring-dashboards`), the `dashboards` job (every
+  `infra/monitoring/dashboards/*.json` is valid JSON with a `uid` and a `title`, has no
+  grafana.com import inputs, and `kustomize` (pinned v5.6.0) renders it into a labelled ConfigMap),
+  a Trivy dependency scan (see "Dependency vulnerability scanning (Trivy)" below),
+  and actionlint over `.github/workflows/`. All jobs run on the self-hosted runner; see
+  "CI runner" below. Run the same checks locally with
   `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color`
   and `docker run --rm -v "$PWD:/apps" -w /apps alpine/helm:3.22.0 lint infra/helm/pet-project --namespace dev`.
   The `helm template` check additionally needs the `envs/dev` and
@@ -143,13 +147,21 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
     --repo https://prometheus-community.github.io/helm-charts --version 91.9.0 \
     --namespace monitoring -f infra/monitoring/values.yaml > /dev/null
   ```
+
+  The dashboards check runs locally with jq and kustomize (see "Dashboards"):
+
+  ```bash
+  jq -e . infra/monitoring/dashboards/*.json > /dev/null
+  docker run --rm -v "$PWD:/w" -w /w registry.k8s.io/kustomize/kustomize:v5.6.0 build infra/monitoring/dashboards > /dev/null
+  ```
 - `.github/workflows/build-images.yml` builds, scans (Trivy) and pushes
   `ghcr.io/<owner>/<repo>/backend:<tag>` and
   `ghcr.io/<owner>/<repo>/frontend:<tag>` on push to `development`/`main`,
   tagged with the branch name and the commit SHA. Each image is scanned
-  before it is pushed; a failed scan blocks the push of that image. The two
-  images build in parallel with fail-fast, so one may already have been
-  pushed by the time the other's scan fails.
+  before it is pushed; a failed scan blocks the push of that image. On one
+  runner the two images build one after the other, and with fail-fast a failing
+  first leg cancels the queued second one; with two runners they build in
+  parallel and one may already have been pushed when the other's scan fails.
 - Build the images locally:
 
   ```bash
@@ -211,16 +223,61 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
   The repo is mounted at `/repo` (Trivy's working directory) so `.trivyignore` at the
   repository root is picked up the same way it is in CI.
 
+## CI runner
+
+- **Where it runs:** a self-hosted GitHub Actions runner on a home machine, labels
+  `self-hosted` and `home`. It runs every job of `ci.yml`, `build-images.yml` and
+  `update-deploy.yml`. Pull requests from forks, from a deleted fork and from Dependabot run
+  `ci.yml` on GitHub-hosted `ubuntu-latest` instead (the `runs-on` expression). Own-branch
+  PRs and pushes use the self-hosted runner. Decision and trust boundaries:
+  [ADR 0021](docs/adr/0021-self-hosted-ci-runner.md).
+- **Fork PRs:** the repository setting "Require approval for all external contributors"
+  (Settings, Actions, General, Fork pull request workflows) is already enabled. A fork PR
+  can edit the workflow files, including `runs-on`, so before approving a run, check its
+  changes under `.github/`.
+- **Host baseline:** Ubuntu LTS on x86_64, the runner as a systemd service under a dedicated
+  non-root user, Docker Engine (rootful, the runner user in the `docker` group; Testcontainers
+  needs the Docker socket), git >= 2.32, bash, coreutils, grep, curl, ca-certificates, tar,
+  gzip and xz-utils. Everything else is installed by the jobs with pinned versions; the
+  list of pins is in [ADR 0006](docs/adr/0006-ci-validation-and-pinning.md).
+- **Restart the service:** in the runner directory, `sudo ./svc.sh status`,
+  `sudo ./svc.sh stop`, `sudo ./svc.sh start`. Or use
+  `sudo systemctl restart actions.runner.<owner>-<repo>.<runner-name>.service`. Jobs wait in
+  "Waiting for a runner..." while the service is down. Fork and Dependabot PRs are not
+  affected.
+- **Disk space and `docker system prune`:** the host keeps Docker images (base images, the
+  Testcontainers `postgres:17` and Ryuk images, built images), the BuildKit cache, the tool
+  cache (`_work/_tool`), `~/.gradle` and `~/.npm`.
+  - `docker system prune` removes stopped containers, dangling images, unused networks and
+    the build cache.
+  - `docker system prune -a` also removes cached base images, so the next runs pull them
+    again from Docker Hub, which rate-limits anonymous pulls per IP.
+  - Only prune when no job is running: stop the service first. `-a` can delete an image that
+    "Build images" has built but not yet pushed.
+- **Persistent state:** `clean: true` removes untracked and changed files but keeps
+  `.git/config` and `.git/hooks` (ADR 0021), which is why "Build images" and
+  `update-deploy.yml` empty the workspace before their checkout; `update-deploy.yml` also
+  deletes its working copy and checkout credentials at the end. Everything else on the host
+  persists between jobs: the runner user's whole home directory (`~/.gradle`, `~/.npm`,
+  `~/.gitconfig`, `~/.docker/`, `~/.local/`), `_work/_tool`, and Docker images, volumes and
+  build cache. Any job can change these, and later jobs use them, including "Build images"
+  (GHCR push token) and "Update deploy manifests" (`DEPLOY_REPO_TOKEN`). This is an accepted
+  risk with two mitigations, git config isolation in `update-deploy.yml` and Dependabot PRs on
+  `ubuntu-latest`; see ADR 0021 "Trust boundaries". To reset it, stop the service, wipe the
+  runner user's home caches and `_work/_tool`, and prune Docker.
+
 ## Deploy (Helm + Argo CD)
 
 - `infra/helm/pet-project` — the chart (backend, frontend, in-cluster
   Postgres, Ingress).
-- `infra/argocd/apps.yaml` — four Argo CD Applications (`pet-project-dev` ->
+- `infra/argocd/apps.yaml` — five Argo CD Applications (`pet-project-dev` ->
   namespace `dev` from branch `development`, `pet-project-prod` -> namespace
   `prod` from branch `main`, `monitoring` -> namespace `monitoring`: the
   kube-prometheus-stack chart from the prometheus-community Helm repo with its
-  values from this repo's `main`, and `monitoring-secrets` -> the Grafana admin
-  SealedSecret from `infra/monitoring/sealed-secrets` on `main`); applied
+  values from this repo's `main`, `monitoring-secrets` -> the Grafana
+  SealedSecrets (admin and Postgres reader) from `infra/monitoring/sealed-secrets`
+  on `main`, and `monitoring-dashboards` -> the Grafana dashboard ConfigMaps
+  from `infra/monitoring/dashboards` on `main`); applied
   once by hand with `kubectl apply -f infra/argocd/apps.yaml`. Each
   pet-project app has two sources: the chart from this repo and the
   environment values from the deploy repo. See "Monitoring
@@ -525,6 +582,64 @@ app` (Rotate step 2) where that matters. The quoting in the SQL statement
 is safe for the hex passwords produced by "Seal credentials"; a password
 containing `'` would break it.
 
+### Grafana read-only user (grafana_reader)
+
+The "Wallet" dashboard reads the prod database as the role `grafana_reader`.
+
+- **What exists:** Flyway `V6__create_grafana_reader_role.sql` creates the cluster-wide role
+  `grafana_reader` in every database the backend migrates: the dev container, `dev`, `prod`
+  and Testcontainers. It has LOGIN, **no password**, SELECT only on `category`, `expense` and
+  `budget_limit`, and read-only sessions. Without a password it cannot log in, which is the
+  state everywhere except prod.
+- **Where the credentials live:** the SealedSecret `grafana-postgres-reader` (namespace
+  `monitoring`, keys `username` = `grafana_reader` and `password`) in
+  `infra/monitoring/sealed-secrets/grafana-postgres-reader.yaml`, applied by
+  `monitoring-secrets`. Grafana reads it at pod start (`envValueFrom`, optional).
+- **When to set the password:**
+  - once, after V6 has run in prod (the prod backend rolled out from `main`) **and**
+    `kubectl -n monitoring get sealedsecret grafana-postgres-reader` shows `Synced=True`;
+  - again after every re-seal of that file.
+- Check the role first: `kubectl -n prod exec statefulset/postgres -- psql -U app -d app -tAc "select rolname from pg_roles where rolname = 'grafana_reader'"`
+  prints `grafana_reader`.
+- **Commands (one at a time, check each output):**
+
+  ```bash
+  READER_PW=$(kubectl -n monitoring get secret grafana-postgres-reader -o jsonpath='{.data.password}' | base64 -d)
+  [ -n "$READER_PW" ] || echo "READER_PW is empty - stop"
+  printf "ALTER USER grafana_reader PASSWORD '%s';\n" "$READER_PW" \
+    | kubectl -n prod exec -i statefulset/postgres -- psql -U app -d app -v ON_ERROR_STOP=1
+  kubectl -n monitoring rollout restart deployment/monitoring-grafana
+  unset READER_PW
+  ```
+
+  - The SQL goes through stdin. `printf` is a shell builtin, so unlike the `-c` variant in
+    "Change the password of an already initialised database", the password does not appear on
+    any command line. The third command must print `ALTER ROLE`.
+  - The empty-guard note from that section applies: an empty value would *clear* the password.
+  - The quoting is safe for hex passwords from `openssl rand -hex`.
+  - The restart makes Grafana re-read the Secret; it is needed if Grafana started before the
+    Secret existed.
+- **Verify:** Grafana -> Connections -> Data sources -> "Wallet (prod Postgres)" -> "Save & test"
+  succeeds (or open the Wallet dashboard). Then
+  `kubectl -n monitoring get secret grafana-postgres-reader -o jsonpath='{.data.username}' | base64 -d; echo`
+  prints `grafana_reader`.
+- **Rotate:** re-seal with the same pattern as the Grafana admin secret, then repeat the
+  commands above after the change reaches `main` and is `Synced`:
+
+  ```bash
+  OUT="infra/monitoring/sealed-secrets/grafana-postgres-reader.yaml"
+  PW="$(openssl rand -hex 24)"
+  ( set -o pipefail
+    printf %s "$PW" \
+    | kubectl create secret generic grafana-postgres-reader --namespace monitoring \
+        --from-literal=username=grafana_reader --from-file=password=/dev/stdin \
+        --dry-run=client -o yaml \
+    | kubeseal --format yaml \
+    > "$OUT.tmp"
+  ) && mv "$OUT.tmp" "$OUT" || rm -f "$OUT.tmp"
+  ```
+- **Never** put the password into the migration, into `values.yaml` or on a command line.
+
 ### Controller key lost / cluster recreated
 
 Existing ciphertext can no longer be decrypted. Re-seal both envs (see "Seal
@@ -549,7 +664,8 @@ The Argo CD Application `monitoring` installs the
 [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack)
 chart (version pinned as `targetRevision` in `infra/argocd/apps.yaml`) into
 namespace `monitoring`. Values: `infra/monitoring/values.yaml`. The Grafana
-admin SealedSecret is applied by a separate Application, `monitoring-secrets`.
+SealedSecrets (admin credentials and the Postgres reader credentials) are applied by a
+separate Application, `monitoring-secrets`, and the dashboards by `monitoring-dashboards`.
 
 - Installed: Prometheus Operator, Prometheus (retention 15d, at most 18GiB,
   20Gi PVC), Grafana, kube-state-metrics, node-exporter, the default rules and
@@ -557,6 +673,9 @@ admin SealedSecret is applied by a separate Application, `monitoring-secrets`.
 - Not installed: Alertmanager (alerting is a later card) and the scrapers of
   kube-controller-manager, kube-scheduler, kube-proxy and etcd (k3s runs them
   inside its own process, so the chart's Services would have no targets).
+- Grafana datasources: Prometheus (provisioned by the chart, uid `prometheus`) and
+  "Wallet (prod Postgres)" (uid `wallet-postgres`, role `grafana_reader`, see "Grafana read-only
+  user (grafana_reader)"). Dashboards: see "Dashboards".
 - Prometheus selects every ServiceMonitor in every namespace, not only those
   labelled `release=monitoring`. The backend's ServiceMonitor comes from the
   pet-project chart (namespaces `dev` and `prod`).
@@ -582,14 +701,16 @@ admin SealedSecret is applied by a separate Application, `monitoring-secrets`.
 2. Seal the Grafana admin credentials (next subsection) and commit
    `infra/monitoring/sealed-secrets/grafana-admin.yaml`.
 3. After the change has reached `main`, run
-   `kubectl apply -f infra/argocd/apps.yaml`. This creates `monitoring` and
-   `monitoring-secrets` and leaves the other two apps unchanged.
-4. Until `main` has `infra/monitoring/`, both apps show "app path does not
-   exist" or a values-file error. This is expected and harmless.
+   `kubectl apply -f infra/argocd/apps.yaml`. This creates `monitoring`,
+   `monitoring-secrets` and `monitoring-dashboards` and leaves the other two apps unchanged.
+4. Until `main` has `infra/monitoring/`, `monitoring`, `monitoring-secrets` and
+   `monitoring-dashboards` show "app path does not exist" or a values-file error. This is expected and harmless.
    Check the secret with `kubectl -n argocd get application monitoring-secrets`
    and `kubectl -n monitoring get sealedsecret grafana-admin` (`Synced=True`).
 5. The pet-project apps pick up the ServiceMonitor once the CRD exists (see
    "Troubleshooting" below).
+6. Set the password of the database role `grafana_reader` (see "Grafana read-only user
+   (grafana_reader)"); until then only the Wallet panels fail.
 
 ### Grafana admin credentials (Sealed Secret)
 
@@ -646,7 +767,7 @@ The user is `admin`. The password is in your password manager, or read it with:
 kubectl -n monitoring get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d; echo
 ```
 
-The Prometheus datasource is provisioned automatically.
+The Prometheus and Wallet (prod Postgres) datasources are provisioned automatically.
 
 ### Check the backend targets in Prometheus
 
@@ -664,6 +785,104 @@ per backend pod, State `UP`. In the query UI:
   shows traffic.
 
 The same queries work in Grafana, Explore.
+
+### Dashboards
+
+- Where they live: `infra/monitoring/dashboards/*.json`. `kustomization.yaml` turns each file
+  into a ConfigMap with the label `grafana_dashboard=1` (stable names, no hash suffix), the
+  Argo CD Application `monitoring-dashboards` applies them, and the Grafana dashboard sidecar
+  loads them into the folder General.
+- Changes go through git: the UI cannot save provisioned dashboards, and Grafana has no
+  persistence.
+- CI (job `dashboards`) checks that every JSON file is valid, has a `uid` and a `title`, carries
+  no `__inputs` or `${DS_...}`, that the uids are unique and that kustomize renders each file
+  into a labelled ConfigMap.
+
+#### JVM (Micrometer)
+
+- Source: grafana.com dashboard 4701, revision 10
+  (`https://grafana.com/api/dashboards/4701/revisions/10/download`); `gnetId` 4701 is kept in
+  the file. The Grafana in this stack is 13.2.3 (image `grafana/grafana:13.2.3-distroless`),
+  which migrates the legacy `graph`/`singlestat` panels and schema 14 rows on load.
+- Edits on top of upstream, exactly six:
+  1. `__inputs` is removed.
+  2. Every `${DS_PROMETHEUS}` becomes the datasource `{type: prometheus, uid: prometheus}`.
+  3. `uid: jvm-micrometer` is added.
+  4. A `namespace` variable (default `prod`) is added after `application`, and the `instance`
+     variable is filtered by it.
+  5. The HTTP panels (Rate, Errors, Duration AVG/MAX/p95) exclude `uri!~"/actuator.*"`:
+     Prometheus scrapes and kubelet probes are not counted, so an idle backend shows a rate of
+     0 and no p95.
+  6. A p95 target (`HTTP - p95`) is added to the panel Duration.
+- The committed file is the output of this jq program applied to the upstream download
+  (generated with jq 1.7.1, `jq --indent 2 -f jvm.jq upstream.json`):
+
+  ```jq
+  # Edits on top of grafana.com dashboard 4701 revision 10 (README "Dashboards"). jq 1.7.1.
+  def prom: {"type": "prometheus", "uid": "prometheus"};
+  # Label matcher of the upstream HTTP queries, and the same matcher without actuator traffic.
+  def sel: "application=\"$application\", instance=\"$instance\"";
+  def sel_no_actuator: sel + ", uri!~\"/actuator.*\"";
+  def is_http_panel: .title == "Rate" or .title == "Errors" or .title == "Duration";
+  # The HTTP target expressions of revision 10, verbatim. If an upgrade changes them, stop.
+  def upstream_http_exprs: [
+    "sum(rate(http_server_requests_seconds_count{application=\"$application\", instance=\"$instance\"}[1m]))",
+    "sum(rate(http_server_requests_seconds_count{application=\"$application\", instance=\"$instance\", status=~\"5..\"}[1m]))",
+    "sum(rate(http_server_requests_seconds_sum{application=\"$application\", instance=\"$instance\", status!~\"5..\"}[1m]))/sum(rate(http_server_requests_seconds_count{application=\"$application\", instance=\"$instance\", status!~\"5..\"}[1m]))",
+    "max(http_server_requests_seconds_max{application=\"$application\", instance=\"$instance\", status!~\"5..\"})"
+  ];
+  if ([.rows[].panels[] | select(is_http_panel) | .targets[].expr] | sort) != (upstream_http_exprs | sort)
+  then error("4701: the Rate/Errors/Duration queries differ from revision 10; review the actuator and p95 edits before upgrading")
+  else . end
+  | del(.__inputs)
+  | walk(if . == "${DS_PROMETHEUS}" then prom else . end)
+  | .uid = "jvm-micrometer"
+  | .templating.list |= (
+      map(if .name == "instance"
+          then .query = "label_values(jvm_memory_used_bytes{application=\"$application\", namespace=\"$namespace\"}, instance)"
+          else . end)
+      | .[0:1]
+        + [{"name": "namespace", "label": "Namespace", "type": "query", "datasource": prom,
+            "query": "label_values(jvm_memory_used_bytes{application=\"$application\"}, namespace)",
+            "refresh": 2, "sort": 1, "hide": 0, "includeAll": false, "multi": false, "regex": "",
+            "options": [], "current": {"selected": true, "text": "prod", "value": "prod"}}]
+        + .[1:])
+  | (.rows[].panels[] | select(is_http_panel) | .targets[].expr) |= (split(sel) | join(sel_no_actuator))
+  | (.rows[].panels[] | select(.title == "Duration") | .targets) += [{
+      "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{application=\"$application\", instance=\"$instance\", uri!~\"/actuator.*\", status!~\"5..\"}[1m])))",
+      "format": "time_series", "intervalFactor": 1, "legendFormat": "HTTP - p95", "refId": "C"}]
+  ```
+
+- Upgrade: download the new revision, run the program with jq 1.7.1 and review the diff. If
+  the program stops with "differ from revision 10", the upstream HTTP queries changed: review
+  them, update `upstream_http_exprs` and the edits, and never just delete the guard. Update the
+  revision in `kustomization.yaml` and here.
+- Use the `Namespace` variable (dev/prod), then `Instance` (one per backend pod).
+
+#### Wallet
+
+- Panels: "Total spent in <month>" (stat), "Spend by category in <month>" (bar chart) and
+  "Limit vs actual" (table). Prod only; all data, no per-user view.
+- The `Month` picker lists the last 12 months in Europe/Warsaw (the default `APP_TIME_ZONE`),
+  newest first, preselects the current month and accepts no custom values.
+- SQL contract: the only panel query is `backend/src/main/resources/db/report/by-category.sql`
+  with `:month` replaced by `${month:sqlstring}` (Grafana quotes and escapes the value, then
+  the SQL casts it to `date`). The other panels reuse that result. `WalletDashboardSqlIT`
+  fails if the dashboard and the SQL file drift. To change the report, change the SQL file and
+  regenerate `rawSql` with:
+
+  ```bash
+  jq -Rs --arg expr '${month:sqlstring}' '
+    rtrimstr("\n")
+    | if (split(":month") | length) != 2 then error("by-category.sql must contain :month exactly once")
+      else split(":month") | join($expr) end' backend/src/main/resources/db/report/by-category.sql
+  ```
+
+  If a Grafana version did not support the `sqlstring` format, the query would fail loudly
+  (an error in the panel) instead of returning wrong data.
+- **Run the test with `--rerun`:** Gradle does not track `infra/monitoring/dashboards/wallet.json`
+  as an input of `test`. After a change to only that file, use `cd backend && ./gradlew test --rerun`,
+  otherwise `test` can be UP-TO-DATE and skip the check. CI always runs it on a fresh checkout.
 
 ### Troubleshooting
 

@@ -14,9 +14,14 @@
 #      infra/monitoring/values.yaml (no `path`, so nothing else is rendered from it)
 #
 # monitoring-secrets has a single plain directory source: infra/monitoring/sealed-secrets in
-# this repo (branch main), which holds the Grafana admin SealedSecret. It is a separate
-# Application so that the chart app keeps the documented chart + `$values` pattern and the
-# SealedSecret applies independently of the chart sync.
+# this repo (branch main), which holds the Grafana SealedSecrets: the admin credentials and the
+# Wallet datasource's Postgres reader credentials. It is a separate Application so that the
+# chart app keeps the documented chart + `$values` pattern and the SealedSecrets apply
+# independently of the chart sync.
+#
+# monitoring-dashboards has a single kustomize source: infra/monitoring/dashboards in this repo
+# (branch main), which generates the Grafana dashboard ConfigMaps for the Grafana sidecar. It is
+# kept separate for the same reason as monitoring-secrets.
 #
 # In every app the two sources deliberately point at different repositories: our Argo CD
 # rejected a multi-source app that referenced two revisions of the same repoURL, which is
@@ -30,7 +35,7 @@
 #
 # Prerequisite: the Sealed Secrets controller must be installed in the cluster
 # (README, "Postgres credentials (Sealed Secrets)"); without its CRD the sync of the
-# pet-project apps and of monitoring-secrets (Grafana admin SealedSecret) fails and
+# pet-project apps and of monitoring-secrets (Grafana SealedSecrets) fails and
 # nothing is applied.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -121,11 +126,13 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true   # the operator CRDs exceed the 256 KiB last-applied-configuration annotation limit
 ---
-# Grafana admin SealedSecret for the monitoring app (kubeseal output, strict scope, namespace
-# "monitoring"). Separate from "monitoring" so that the chart app keeps the documented chart +
-# `$values` pattern and the SealedSecret applies independently of the chart sync.
-# If the file cannot be decrypted (wrong name/namespace, another controller key), Grafana waits
+# Grafana SealedSecrets (grafana-admin, grafana-postgres-reader) for the monitoring app (kubeseal
+# output, strict scope, namespace "monitoring"). Separate from "monitoring" so that the chart app
+# keeps the documented chart + `$values` pattern and the SealedSecrets apply independently of
+# the chart sync.
+# If grafana-admin cannot be decrypted (wrong name/namespace, another controller key), Grafana waits
 # in CreateContainerConfigError for the Secret grafana-admin; the rest of the stack stays healthy.
+# If grafana-postgres-reader cannot be decrypted, only the Wallet panels fail.
 # Without the directory this app shows "app path does not exist"; monitoring still installs.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -147,3 +154,29 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
+---
+# Grafana dashboards (JVM, Wallet) as ConfigMaps: kustomize configMapGenerator over the JSON files
+# in infra/monitoring/dashboards, label grafana_dashboard=1, picked up by the Grafana dashboard
+# sidecar of "monitoring". Separate from "monitoring" for the same reason as monitoring-secrets.
+# See README "Dashboards".
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-dashboards
+  namespace: argocd
+spec:
+  project: default
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  source:
+    repoURL: https://github.com/Katran1990/pet-project.git
+    targetRevision: main
+    path: infra/monitoring/dashboards
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true   # large dashboard ConfigMaps would exceed the 256 KiB last-applied annotation

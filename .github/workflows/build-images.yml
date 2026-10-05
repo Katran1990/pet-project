@@ -3,9 +3,12 @@
 #
 # Each image is scanned with Trivy before it is pushed. A failed scan blocks the
 # push of that image, and therefore also blocks "Update deploy manifests" for it
-# (it only runs after this workflow succeeds). Matrix legs run in parallel with the
-# default fail-fast: one leg may already have pushed its image before the other
-# leg's gate fails and cancels it, so a failed run does not mean nothing was pushed.
+# (it only runs after this workflow succeeds). The build runs on the self-hosted runner's
+# Docker daemon (ADR 0021). With one runner instance the two matrix legs run one after the
+# other, and with the default fail-fast a failing first leg cancels the queued second one.
+# With two runner instances the legs run in parallel, and one leg may already have pushed
+# its image before the other leg's gate fails and cancels it. Either way, a failed run does
+# not mean nothing was pushed.
 #
 # Resulting images:
 #   ghcr.io/<owner>/<repo>/backend:<tag>
@@ -35,10 +38,13 @@ env:
 jobs:
   build:
     name: Build ${{ matrix.service }}
-    runs-on: ubuntu-latest
+    # Literal self-hosted labels: this workflow only runs on push to development/main, never on
+    # pull_request, so it never runs fork code (ADR 0021).
+    runs-on: [self-hosted, home]
+    timeout-minutes: 30
     strategy:
       matrix:
-        service: [backend, frontend]     # one job per service, run in parallel
+        service: [backend, frontend]     # one job per service
     # Job-level permissions replace the workflow-level block above, so all three
     # are listed here: security-events: write is only needed to upload SARIF.
     permissions:
@@ -46,9 +52,28 @@ jobs:
       packages: write
       security-events: write
     steps:
-      - uses: actions/checkout@v6
+      # All workflows share one workspace on the persistent runner, and clean: true keeps an
+      # existing .git/config and .git/hooks. Without this wipe, checkout would reuse a .git planted
+      # by an earlier job (hooks, remote URL) and run it with INPUT_TOKEN = the GITHUB_TOKEN that
+      # has packages: write, so checkout must start from an empty directory (ADR 0021).
+      - name: Empty the workspace before checkout
+        run: find "${GITHUB_WORKSPACE:?}" -mindepth 1 -delete
 
+      # clean: true - the self-hosted runner reuses _work; the workspace was already emptied above.
+      # No later step uses git credentials (docker/login-action uses GITHUB_TOKEN itself).
+      - uses: actions/checkout@v6
+        with:
+          clean: true
+          persist-credentials: false
+
+      # Default docker-container driver: BuildKit runs as a container on the runner's local Docker
+      # daemon, which type=gha cache export needs (ADR 0006). version pins the buildx CLI plugin
+      # the action installs, driver-opts pins the BuildKit image by tag and digest. The default
+      # cleanup: true removes the builder container at the end of the job.
       - uses: docker/setup-buildx-action@v4
+        with:
+          version: v0.37.2
+          driver-opts: image=moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
 
       # Generates tags: branch name + short commit SHA
       - name: Image metadata
@@ -158,7 +183,9 @@ jobs:
           TRIVY_SKIP_JAVA_DB_UPDATE: true
 
       # Log in only after the image has passed the gate: the write-capable registry
-      # login exists only once there is something safe to push.
+      # login exists only once there is something safe to push. The default logout: true
+      # removes the GHCR credential from the runner user's ~/.docker/config.json at the end
+      # of the job (the host is persistent).
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:

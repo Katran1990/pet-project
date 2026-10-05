@@ -1,6 +1,18 @@
 # CI: runs on every pull request and on every push to development / main.
-# Five independent jobs (backend, frontend, the Helm chart check, actionlint and the
-# Trivy dependency scan) run in parallel.
+# Six independent jobs (backend, frontend, the Helm chart check, the Grafana dashboards check,
+# actionlint and the Trivy dependency scan) run in parallel on separate runners, or one after
+# another when only one runner instance is online.
+#
+# Runner selection (ADR 0021): every job runs on the self-hosted runner [self-hosted, home],
+# except pull requests from forks, from a deleted fork and from Dependabot, which run on
+# GitHub-hosted ubuntu-latest. Pushes and PRs from branches of this repository use the
+# self-hosted runner. On push events github.event.pull_request is absent, so the condition is
+# false and the self-hosted labels are used. The same runs-on expression is repeated in every
+# job because runs-on cannot read the workflow-level env. Every future job triggered by
+# pull_request must use the same expression.
+# The expression is NOT a security boundary: a fork PR runs its own copy of this file and can
+# change runs-on. The boundary is the repository setting "Require approval for all external
+# contributors" (ADR 0021).
 name: CI
 
 on:
@@ -17,21 +29,40 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Pinned CLI tools (ADR 0006): version plus SHA-256 of the linux amd64 release asset, taken
+  # from the publisher's checksum file. Bump version and checksum together. update-deploy.yml
+  # installs yq with the same values.
+  YQ_VERSION: v4.54.1             # mikefarah/yq, asset yq_linux_amd64
+  YQ_SHA256: 8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f
+  JQ_VERSION: 1.8.2               # jqlang/jq, asset jq-linux-amd64
+  JQ_SHA256: b1c22172dd303f3be49e935aa56aa48a8b7a46e0bc838b4997d3bb451495870f
+  KUSTOMIZE_VERSION: v5.6.0       # same version as the README's local kustomize command
+  KUSTOMIZE_SHA256: 54e4031ddc4e7fc59e408da29e7c646e8e57b8088c51b84b3df0864f47b5148f  # kustomize_v5.6.0_linux_amd64.tar.gz
+
 jobs:
   backend:
     name: Backend (Gradle)
-    runs-on: ubuntu-latest        # GitHub runners have Docker, so Testcontainers works
-    # Backend tests use Testcontainers (Postgres 17), which needs the runner's Docker daemon.
+    runs-on: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login == 'dependabot[bot]') && 'ubuntu-latest' || fromJSON('["self-hosted","home"]') }}
+    timeout-minutes: 30
+    # Backend tests use Testcontainers (Postgres 17), which needs the runner's Docker daemon
+    # (host baseline, README "CI runner").
     defaults:
       run:
         working-directory: backend
     steps:
+      # clean: true - the self-hosted runner reuses _work
       - uses: actions/checkout@v6
+        with:
+          clean: true
+          persist-credentials: false
 
+      # Pinned to the 25.0.4 patch line (ADR 0006): "25.0.4" resolves to the newest 25.0.4.x
+      # Temurin build (as of 2026-10-05: jdk-25.0.4.1+1).
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: "25.0.4"
 
       # Caches Gradle dependencies between runs and validates gradle-wrapper.jar
       - uses: gradle/actions/setup-gradle@v6
@@ -50,16 +81,21 @@ jobs:
 
   frontend:
     name: Frontend (Vite)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login == 'dependabot[bot]') && 'ubuntu-latest' || fromJSON('["self-hosted","home"]') }}
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: frontend
     steps:
+      # clean: true - the self-hosted runner reuses _work
       - uses: actions/checkout@v6
+        with:
+          clean: true
+          persist-credentials: false
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: "24.21.0"       # exact pin (ADR 0006)
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
@@ -79,14 +115,18 @@ jobs:
 
   helm:
     name: Helm chart
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login == 'dependabot[bot]') && 'ubuntu-latest' || fromJSON('["self-hosted","home"]') }}
     timeout-minutes: 5
     steps:
+      # clean: true - the self-hosted runner reuses _work
       - uses: actions/checkout@v6
         with:
+          clean: true
           persist-credentials: false
 
       # Environment values live in the deploy repo (see infra/argocd/apps.yaml), not here.
+      # A stale nested deploy-values/ repo is already removed by the first checkout's
+      # git clean -ffdx in this job.
       # Read-only checkout with the built-in token: the deploy repo is public, so no secret
       # is needed, and DEPLOY_REPO_TOKEN (write access) is deliberately kept out of PR jobs.
       # Works the same for PRs from forks and Dependabot. If the deploy repo ever becomes
@@ -97,8 +137,23 @@ jobs:
           repository: Katran1990/pet-project-deploy
           ref: main
           path: deploy-values
+          clean: true
           persist-credentials: false   # read-only: do not leave the token in .git/config
           sparse-checkout: envs
+
+      # The self-hosted runner is a bare machine (ADR 0006): install yq explicitly. RUNNER_TEMP is
+      # emptied by the runner at the start and end of every job, so nothing persists on the host.
+      # GITHUB_PATH prepends, so on ubuntu-latest this binary wins over the preinstalled yq.
+      - name: Install yq (pinned)
+        run: |
+          bin="${RUNNER_TEMP}/bin"
+          mkdir -p "${bin}"
+          curl -fsSL --retry 3 -o "${bin}/yq" \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  ${bin}/yq" | sha256sum -c -
+          chmod +x "${bin}/yq"
+          "${bin}/yq" --version
+          echo "${bin}" >> "$GITHUB_PATH"
 
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1, pinned by SHA (third-party action)
         with:
@@ -140,11 +195,13 @@ jobs:
       # Renders kube-prometheus-stack as the "monitoring" Argo CD Application does: same chart
       # version, release name and namespace as infra/argocd/apps.yaml, plus
       # infra/monitoring/values.yaml. --repo fetches the packaged chart (subcharts included),
-      # so no `helm repo add` is needed. The yq checks (mikefarah yq v4, preinstalled on
-      # GitHub-hosted ubuntu-latest runners) fail the step unless apps.yaml pins the same chart
+      # so no `helm repo add` is needed. The yq checks (mikefarah yq v4, installed by the
+      # "Install yq (pinned)" step above) fail the step unless apps.yaml pins the same chart
       # version for the "monitoring" Application, its `ref: values` source has no `path`, and the
       # "monitoring-secrets" Application applies infra/monitoring/sealed-secrets from main into
-      # namespace monitoring. Output goes to /dev/null: it is several thousand lines.
+      # namespace monitoring, and the "monitoring-dashboards" Application applies
+      # infra/monitoring/dashboards from main into namespace monitoring. Output goes to
+      # /dev/null: it is several thousand lines.
       - name: Render kube-prometheus-stack with monitoring values
         env:
           KPS_VERSION: 91.9.0   # keep in sync with the "monitoring" Application in infra/argocd/apps.yaml
@@ -161,15 +218,96 @@ jobs:
                  | select(.destination.namespace == "monitoring" and .source.path == "infra/monitoring/sealed-secrets" and .source.targetRevision == "main")' \
             infra/argocd/apps.yaml > /dev/null \
             || { echo "::error::apps.yaml: Application monitoring-secrets must apply infra/monitoring/sealed-secrets from main into namespace monitoring"; exit 1; }
+          yq -e 'select(.metadata.name == "monitoring-dashboards") | .spec
+                 | select(.destination.namespace == "monitoring" and .source.path == "infra/monitoring/dashboards" and .source.targetRevision == "main")' \
+            infra/argocd/apps.yaml > /dev/null \
+            || { echo "::error::apps.yaml: Application monitoring-dashboards must apply infra/monitoring/dashboards from main into namespace monitoring"; exit 1; }
           helm template monitoring kube-prometheus-stack \
             --repo https://prometheus-community.github.io/helm-charts \
             --version "${KPS_VERSION}" \
             --namespace monitoring \
             -f infra/monitoring/values.yaml > /dev/null
 
+  dashboards:
+    name: Grafana dashboards
+    runs-on: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login == 'dependabot[bot]') && 'ubuntu-latest' || fromJSON('["self-hosted","home"]') }}
+    timeout-minutes: 5
+    steps:
+      # clean: true - the self-hosted runner reuses _work
+      - uses: actions/checkout@v6
+        with:
+          clean: true
+          persist-credentials: false
+
+      # jq, yq (mikefarah v4) and kustomize are installed by the pinned steps below (ADR 0006).
+      - name: Install jq (pinned)
+        run: |
+          bin="${RUNNER_TEMP}/bin"
+          mkdir -p "${bin}"
+          curl -fsSL --retry 3 -o "${bin}/jq" \
+            "https://github.com/jqlang/jq/releases/download/jq-${JQ_VERSION}/jq-linux-amd64"
+          echo "${JQ_SHA256}  ${bin}/jq" | sha256sum -c -
+          chmod +x "${bin}/jq"
+          "${bin}/jq" --version
+          echo "${bin}" >> "$GITHUB_PATH"
+
+      # Same install pattern as in the helm job.
+      - name: Install yq (pinned)
+        run: |
+          bin="${RUNNER_TEMP}/bin"
+          mkdir -p "${bin}"
+          curl -fsSL --retry 3 -o "${bin}/yq" \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  ${bin}/yq" | sha256sum -c -
+          chmod +x "${bin}/yq"
+          "${bin}/yq" --version
+          echo "${bin}" >> "$GITHUB_PATH"
+
+      - name: Install kustomize (pinned)
+        run: |
+          bin="${RUNNER_TEMP}/bin"
+          mkdir -p "${bin}"
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/kustomize.tar.gz" \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64.tar.gz"
+          echo "${KUSTOMIZE_SHA256}  ${RUNNER_TEMP}/kustomize.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/kustomize.tar.gz" -C "${bin}" kustomize
+          "${bin}/kustomize" version
+          echo "${bin}" >> "$GITHUB_PATH"
+
+      # Each dashboard must be valid JSON with a uid and a title, and must not
+      # carry grafana.com import inputs (__inputs / ${DS_...}): the Grafana sidecar does not resolve
+      # them. The jq program is in single quotes, so the shell never expands the "${DS_" in it, and
+      # shellcheck's SC2016 ("expressions don't expand in single quotes") exempts jq programs.
+      - name: Validate dashboard JSON
+        run: |
+          shopt -s nullglob
+          files=(infra/monitoring/dashboards/*.json)
+          [ "${#files[@]}" -gt 0 ] || { echo "::error::no dashboards in infra/monitoring/dashboards"; exit 1; }
+          for f in "${files[@]}"; do
+            jq -e '(.uid | type == "string" and length > 0)
+                   and (.title | type == "string" and length > 0)
+                   and (has("__inputs") | not)
+                   and ([.. | strings | select(contains("${DS_"))] | length == 0)' "$f" > /dev/null \
+              || { echo "::error file=${f}::invalid JSON, missing uid/title, or unresolved import inputs"; exit 1; }
+          done
+          dup="$(jq -r .uid "${files[@]}" | sort | uniq -d)"
+          [ -z "${dup}" ] || { echo "::error::duplicate dashboard uid(s): ${dup}"; exit 1; }
+
+      # Renders the ConfigMaps exactly as Argo CD does (kustomize) and checks that every JSON file
+      # ends up in a ConfigMap in namespace monitoring with the sidecar label grafana_dashboard=1.
+      - name: Render dashboard ConfigMaps (kustomize)
+        run: |
+          out="${RUNNER_TEMP}/dashboards.yaml"
+          kustomize build infra/monitoring/dashboards > "${out}"
+          for f in infra/monitoring/dashboards/*.json; do
+            NAME="$(basename "${f}")" yq -e 'select(.kind == "ConfigMap" and .metadata.namespace == "monitoring"
+                   and .metadata.labels.grafana_dashboard == "1" and (.data | has(strenv(NAME))))' "${out}" > /dev/null \
+              || { echo "::error file=${f}::not rendered into a labelled ConfigMap (kustomization.yaml)"; exit 1; }
+          done
+
   dependency-scan:
     name: Dependencies (Trivy)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login == 'dependabot[bot]') && 'ubuntu-latest' || fromJSON('["self-hosted","home"]') }}
     timeout-minutes: 10
     # Job-level permissions replace the workflow-level block, which is why
     # contents: read is listed again here, alongside security-events: write
@@ -178,8 +316,10 @@ jobs:
       contents: read
       security-events: write
     steps:
+      # clean: true - the self-hosted runner reuses _work
       - uses: actions/checkout@v6
         with:
+          clean: true
           persist-credentials: false
 
       # No JDK or Node setup: Trivy reads backend/gradle.lockfile and
@@ -265,11 +405,13 @@ jobs:
 
   actionlint:
     name: Workflow lint (actionlint)
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login == 'dependabot[bot]') && 'ubuntu-latest' || fromJSON('["self-hosted","home"]') }}
     timeout-minutes: 5
     steps:
+      # clean: true - the self-hosted runner reuses _work
       - uses: actions/checkout@v6
         with:
+          clean: true
           persist-credentials: false
 
       # Checks every file in .github/workflows/ (actionlint's default when run from the repo root),
