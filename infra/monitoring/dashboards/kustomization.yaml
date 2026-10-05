@@ -1,0 +1,25 @@
+# Grafana dashboards as ConfigMaps, applied by the Argo CD Application "monitoring-dashboards"
+# (infra/argocd/apps.yaml) and picked up by the Grafana dashboard sidecar of the "monitoring"
+# app via the label grafana_dashboard=1 (kube-prometheus-stack default). Edit the JSON in git;
+# the UI cannot save provisioned dashboards. See README "Dashboards".
+#
+# jvm-micrometer.json: grafana.com dashboard 4701 "JVM (Micrometer)", revision 10
+# (https://grafana.com/api/dashboards/4701/revisions/10/download), plus the edits applied by the
+# jq program in README "Dashboards" (datasource uid, dashboard uid, namespace variable, actuator
+# traffic excluded from the HTTP panels, p95).
+# wallet.json: hand-written; its only panel SQL is db/report/by-category.sql with :month replaced
+# by the month variable (WalletDashboardSqlIT).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+generatorOptions:
+  disableNameSuffixHash: true   # stable names: updates are in-place modifies for the sidecar
+  labels:
+    grafana_dashboard: "1"
+configMapGenerator:
+  - name: grafana-dashboard-jvm-micrometer
+    files:
+      - jvm-micrometer.json
+  - name: grafana-dashboard-wallet
+    files:
+      - wallet.json

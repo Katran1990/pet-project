@@ -6,6 +6,9 @@
 # limit (no CPU limits, like infra/helm/pet-project/values.yaml), and unused parts are off.
 # Never put a password here. Grafana's admin credentials come from the SealedSecret
 # infra/monitoring/sealed-secrets/grafana-admin.yaml (README "Monitoring (kube-prometheus-stack)").
+# The Wallet datasource credentials come from the SealedSecret
+# infra/monitoring/sealed-secrets/grafana-postgres-reader.yaml
+# (README "Grafana read-only user (grafana_reader)").
 
 # Alerting is a separate card. Without Alertmanager, Prometheus gets no alerting section.
 alertmanager:
@@ -54,6 +57,31 @@ grafana:
     existingSecret: grafana-admin   # SealedSecret, see the header; keys below
     userKey: admin-user
     passwordKey: admin-password
+  # Wallet datasource credentials from the Secret grafana-postgres-reader (SealedSecret
+  # infra/monitoring/sealed-secrets/grafana-postgres-reader.yaml, applied by monitoring-secrets).
+  # optional: Grafana and the JVM dashboards still start without it; only the Wallet panels fail.
+  # Read at pod start: restart Grafana after a change (README).
+  envValueFrom:
+    GRAFANA_POSTGRES_READER_USER:
+      secretKeyRef: { name: grafana-postgres-reader, key: username, optional: true }
+    GRAFANA_POSTGRES_READER_PASSWORD:
+      secretKeyRef: { name: grafana-postgres-reader, key: password, optional: true }
+  # Read-only access to the prod database for the "Wallet" dashboard (role grafana_reader,
+  # Flyway V6). Grafana expands the ${...} env references when it provisions the datasource.
+  additionalDataSources:
+    - name: Wallet (prod Postgres)
+      uid: wallet-postgres            # referenced by infra/monitoring/dashboards/wallet.json
+      type: grafana-postgresql-datasource
+      access: proxy
+      url: postgres.prod.svc.cluster.local:5432   # Service "postgres" of the pet-project chart
+      user: ${GRAFANA_POSTGRES_READER_USER}
+      jsonData:
+        database: app                 # postgres.db of the pet-project chart
+        sslmode: disable              # the in-cluster postgres:17 has no TLS
+        postgresVersion: 1700         # postgres:17
+      secureJsonData:
+        password: ${GRAFANA_POSTGRES_READER_PASSWORD}
+      editable: false
   ingress:
     enabled: true
     hosts:
@@ -68,6 +96,7 @@ grafana:
       requests: { cpu: 10m, memory: 96Mi }
       limits:   { memory: 192Mi }
     datasources:
+      uid: prometheus             # chart default, spelled out: dashboards reference the Prometheus datasource by this uid
       alertmanager:
         enabled: false              # rendered even with alertmanager.enabled=false otherwise
 

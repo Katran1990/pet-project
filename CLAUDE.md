@@ -34,6 +34,9 @@
 - An empty string in an optional string field is normalised to null
   in POST and PATCH. In PATCH, an omitted or null optional string
   field means "leave unchanged", an empty string means "clear".
+- Architecture decisions are recorded in docs/adr/ (index: docs/adr/README.md).
+  Read the index before proposing a convention; if a plan introduces a new
+  one, add an ADR with status "proposed".
 
 ## Language
 - Everything in the repository is in English: code, comments, docs, config,
