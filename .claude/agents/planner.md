@@ -19,6 +19,11 @@ Process:
    the plan must list: artifact, version, why it is needed, and what it
    would cost to write by hand instead. Do not add a dependency for
    something the existing stack already does.
+5. Read the ADR index docs/adr/README.md and every ADR relevant to the task.
+   If the plan deviates from an existing ADR, the plan must include the ADR
+   change (as a file in Changes) and say so explicitly: name the ADR, what
+   the plan does differently and why. If the plan introduces a new
+   convention, it adds an ADR with status "proposed".
 
 Return the plan as Markdown with exactly these sections:
 
@@ -39,7 +44,7 @@ Which tests will prove each acceptance criterion (unit / integration / frontend)
 Anything ambiguous in the task. If a criterion cannot be planned without a
 decision from the user, say so explicitly instead of guessing.
 Every new dependency is listed here as an open question until the user
-confirms it.
+confirms it. So is every deviation from an existing ADR.
 
 ## Out of scope
 What this task deliberately does not do.
