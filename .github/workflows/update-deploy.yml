@@ -18,7 +18,11 @@ permissions:
 jobs:
   update:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
-    runs-on: ubuntu-latest
+    # Self-hosted (ADR 0021). workflow_run fires only after "Build images", which is push-only and
+    # filtered to development/main, so no fork code runs here, and DEPLOY_REPO_TOKEN is not
+    # available to forks anyway.
+    runs-on: [self-hosted, home]
+    timeout-minutes: 10
     steps:
       - name: Pick environment
         id: pick
@@ -43,20 +47,53 @@ jobs:
         run: |
           if [ -z "$DEPLOY_REPO_TOKEN" ]; then echo "DEPLOY_REPO_TOKEN is not set"; exit 1; fi
 
+      # All workflows share one workspace on the persistent runner, and clean: true keeps an
+      # existing .git/config and .git/hooks. Without this wipe, checkout would reuse a .git planted
+      # by an earlier job (hooks, remote URL, insteadOf) and run it with DEPLOY_REPO_TOKEN in the
+      # environment, so checkout must start from an empty directory (ADR 0021).
+      - name: Empty the workspace before checkout
+        run: find "${GITHUB_WORKSPACE:?}" -mindepth 1 -delete
+
+      # The self-hosted host is persistent: an empty HOME and no system config keep a poisoned
+      # ~/.gitconfig or /etc/gitconfig out of checkout's git calls (ADR 0021).
+      - name: Create an empty HOME for checkout
+        run: mkdir -p "${RUNNER_TEMP}/empty-home"
+
+      # clean: true - the self-hosted runner reuses _work; the workspace was already emptied above,
+      # so no earlier .git is reused
       - uses: actions/checkout@v6
+        env:
+          HOME: ${{ runner.temp }}/empty-home
+          GIT_CONFIG_NOSYSTEM: "1"
         with:
+          clean: true
           repository: Katran1990/pet-project-deploy
           ref: main
           token: ${{ secrets.DEPLOY_REPO_TOKEN }}
           persist-credentials: true   # keep the token in the checkout's git config so the push below authenticates
           fetch-depth: 0              # full history: the push step rebases, which is fragile on a shallow clone
 
+      # The runner is a bare machine (ADR 0006): install yq explicitly. These values must equal
+      # YQ_VERSION / YQ_SHA256 in ci.yml; bump both files together.
+      - name: Install yq (pinned)
+        env:
+          YQ_VERSION: v4.54.1
+          YQ_SHA256: 8e34fc298390875de416e6a4afcb8cabeceb25d9aa8506c1a2f9353cf702ea5f
+        run: |
+          bin="${RUNNER_TEMP}/bin"
+          mkdir -p "${bin}"
+          curl -fsSL --retry 3 -o "${bin}/yq" \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          echo "${YQ_SHA256}  ${bin}/yq" | sha256sum -c -
+          chmod +x "${bin}/yq"
+          "${bin}/yq" --version
+          echo "${bin}" >> "$GITHUB_PATH"
+
       - name: Set image tags
         env:
           TAG: ${{ steps.pick.outputs.tag }}
           ENV_NAME: ${{ steps.pick.outputs.name }}
         run: |
-          # yq v4 (mikefarah) is preinstalled on ubuntu-latest runners
           FILE="envs/${ENV_NAME}/values.yaml"
           yq -i ".backend.tag = strenv(TAG) | .frontend.tag = strenv(TAG)" "$FILE"
           # Credentials come from SealedSecrets in the chart, never from env values.
@@ -71,8 +108,14 @@ jobs:
           fi
           cat "$FILE"
 
+      # GIT_CONFIG_GLOBAL=/dev/null and GIT_CONFIG_NOSYSTEM keep a poisoned global or system git
+      # config on the persistent host from redirecting the push or capturing the token. The
+      # token itself lives in the checkout's repository-local config (and a file under
+      # RUNNER_TEMP included from it), which is still read.
       - name: Commit and push
         env:
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_NOSYSTEM: "1"
           ENV_NAME: ${{ steps.pick.outputs.name }}
           TAG: ${{ steps.pick.outputs.tag }}
         run: |
@@ -93,3 +136,17 @@ jobs:
           done
           echo "could not push to the deploy repo after 3 attempts"
           exit 1
+
+      # The self-hosted runner is persistent: delete this job's working copy (the deploy repo
+      # checkout and its .git/config) so no token-bearing state survives in the workspace under
+      # _work. The token itself sits in a credentials file under RUNNER_TEMP (_work/_temp) that
+      # .git/config includes. Deleting .git/config first makes checkout's post step return early,
+      # so it no longer removes that file; hence the explicit removal below, run first so the
+      # token file goes even if the workspace delete fails. The workspace
+      # directory itself stays; the runner expects it to exist. always(): also after a failure
+      # or cancellation.
+      - name: Delete the working copy and checkout credentials
+        if: always()
+        run: |
+          find "${RUNNER_TEMP:?}" -maxdepth 1 -name 'git-credentials-*' -delete
+          find "${GITHUB_WORKSPACE:?}" -mindepth 1 -delete

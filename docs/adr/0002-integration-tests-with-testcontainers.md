@@ -36,7 +36,9 @@ container.
 - Anything else: not recorded.
 
 ## Consequences
-- Every backend test run needs Docker, locally and in CI (`ubuntu-latest` provides it).
+- Every backend test run needs Docker, locally and in CI. CI uses the self-hosted
+  runner's Docker daemon (host baseline, ADR 0021); GitHub-hosted runners provide it for
+  fork and Dependabot PRs.
 - Each extra context (bean override) adds a container start, a few seconds per class.
 - Authors of new integration tests must check which months and data the shared context
   already uses (see the class comment of `ReportControllerIT`).
