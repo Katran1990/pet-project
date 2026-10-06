@@ -59,13 +59,18 @@ jobs:
 
       # Pinned to the 25.0.4 patch line (ADR 0006): "25.0.4" resolves to the newest 25.0.4.x
       # Temurin build (as of 2026-10-05: jdk-25.0.4.1+1).
+      # No cache input on setup-java: Gradle uses the runner's ~/.gradle (ADR 0021).
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "25.0.4"
 
-      # Caches Gradle dependencies between runs and validates gradle-wrapper.jar
+      # Validates gradle-wrapper.jar. Its GitHub Actions cache is disabled: the self-hosted
+      # runner keeps ~/.gradle between jobs (ADR 0021). Fork and Dependabot PRs on
+      # ubuntu-latest start without a Gradle cache.
       - uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-disabled: true
 
       - name: Build and test
         run: ./gradlew build --no-daemon
@@ -93,11 +98,14 @@ jobs:
           clean: true
           persist-credentials: false
 
+      # No GitHub Actions cache here: npm ci uses the self-hosted runner's ~/.npm (ADR 0021).
+      # package-manager-cache: false stops setup-node from turning caching on by itself if
+      # package.json ever gets a packageManager field. Fork and Dependabot PRs on
+      # ubuntu-latest start without an npm cache.
       - uses: actions/setup-node@v6
         with:
           node-version: "24.21.0"       # exact pin (ADR 0006)
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          package-manager-cache: false
 
       - name: Install dependencies
         run: npm ci              # exact versions from package-lock.json
@@ -338,6 +346,9 @@ jobs:
           trivyignores: .trivyignore
           exit-code: "0"
           version: v0.70.0
+          # No GitHub Actions cache (ADR 0021): the Trivy DB and binary are neither restored
+          # from it nor saved to it.
+          cache: "false"
         env:
           TRIVY_INCLUDE_DEV_DEPS: true
 

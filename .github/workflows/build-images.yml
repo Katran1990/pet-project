@@ -114,6 +114,9 @@ jobs:
           trivyignores: .trivyignore
           exit-code: "0"
           version: v0.70.0
+          # No GitHub Actions cache on the self-hosted runner (ADR 0021): the Trivy DB and
+          # binary are neither restored from it nor saved to it.
+          cache: "false"
         env:
           # Scan the local image built above, never pull the old branch tag from GHCR.
           TRIVY_IMAGE_SRC: docker

@@ -245,15 +245,71 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
   `sudo systemctl restart actions.runner.<owner>-<repo>.<runner-name>.service`. Jobs wait in
   "Waiting for a runner..." while the service is down. Fork and Dependabot PRs are not
   affected.
-- **Disk space and `docker system prune`:** the host keeps Docker images (base images, the
-  Testcontainers `postgres:17` and Ryuk images, built images), the BuildKit cache, the tool
-  cache (`_work/_tool`), `~/.gradle` and `~/.npm`.
-  - `docker system prune` removes stopped containers, dangling images, unused networks and
-    the build cache.
-  - `docker system prune -a` also removes cached base images, so the next runs pull them
-    again from Docker Hub, which rate-limits anonymous pulls per IP.
-  - Only prune when no job is running: stop the service first. `-a` can delete an image that
-    "Build images" has built but not yet pushed.
+- **Caches:** Gradle and npm use the runner user's `~/.gradle` and `~/.npm`. The workflows
+  use no GitHub Actions cache for them or for the Trivy scans (ADR 0021), so fork and
+  Dependabot PRs on `ubuntu-latest` download their dependencies on every run. Image layers
+  still use the GitHub Actions cache (`type=gha`).
+- **Disk space:** the host keeps Docker images (base images, the Testcontainers `postgres:17`
+  and Ryuk images, built images), the tool cache (`_work/_tool`), `~/.gradle` and `~/.npm`.
+  Every "Build images" run leaves a new image tagged with its commit SHA.
+  - **Weekly prune (systemd timer, installed by hand):** `docker-prune.timer` starts
+    `docker-prune.service` every Sunday at 04:00. With `Persistent=true`, a run missed while
+    the host was off happens at the next boot. The service runs
+    `docker system prune --all --force --filter until=168h`. It removes stopped containers,
+    unused networks, unused images and build cache, but only objects created more than
+    7 days ago. Volumes are never pruned. The timer runs at 04:00 on Sunday, when normally no
+    job runs, and an image built in a running job is normally younger than 7 days, so the
+    runner service can keep running. For images, the `until` filter compares against the
+    image's `Created` date (when it was built, upstream for base images), not when it was
+    pulled, and a fully cached build can keep an older `Created` date. Old base images (for
+    example `postgres:17`) are pulled again by the next job that needs them. Install it once:
+
+    ```bash
+    sudo tee /etc/systemd/system/docker-prune.service > /dev/null <<'EOF'
+    [Unit]
+    Description=Weekly docker system prune for the CI runner
+    Requires=docker.service
+    After=docker.service
+
+    [Service]
+    Type=oneshot
+    ExecStart=/usr/bin/docker system prune --all --force --filter until=168h
+    EOF
+    sudo tee /etc/systemd/system/docker-prune.timer > /dev/null <<'EOF'
+    [Unit]
+    Description=Run docker-prune.service weekly
+
+    [Timer]
+    OnCalendar=Sun *-*-* 04:00:00
+    Persistent=true
+
+    [Install]
+    WantedBy=timers.target
+    EOF
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now docker-prune.timer
+    ```
+
+    Check it with `systemctl list-timers docker-prune.timer` (last and next run) and
+    `sudo journalctl -u docker-prune.service -n 50` (what the last run reclaimed).
+  - **Check disk usage:**
+
+    ```bash
+    df -h / /var/lib/docker      # free space on the root and the Docker filesystem
+    docker system df             # images, containers, volumes, build cache, "RECLAIMABLE"
+    docker system df -v          # the same per image, container and volume
+    sudo du -sh ~gh-runner/.gradle ~gh-runner/.npm ~gh-runner/.cache ~gh-runner/.local \
+      <runner-dir>/_work/_tool
+    ```
+
+    Gradle deletes cache entries it has not used for 30 days on its own; `~/.npm` only grows.
+    To shrink it, stop the service and run `sudo rm -rf ~gh-runner/.npm/_cacache`; the next
+    `npm ci` downloads again.
+  - **Pruning by hand:** `docker system prune` removes stopped containers, dangling images,
+    unused networks and the build cache. `docker system prune -a` also removes cached base
+    images, so the next runs pull them again from Docker Hub, which rate-limits anonymous pulls
+    per IP. Without the `until` filter, only prune when no job is running: stop the service
+    first, because `-a` can delete an image that "Build images" has built but not yet pushed.
 - **Persistent state:** `clean: true` removes untracked and changed files but keeps
   `.git/config` and `.git/hooks` (ADR 0021), which is why "Build images" and
   `update-deploy.yml` empty the workspace before their checkout; `update-deploy.yml` also
