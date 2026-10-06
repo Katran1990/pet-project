@@ -11,7 +11,7 @@ Amended: 2026-10-06, before acceptance: no GitHub Actions cache for Gradle, npm 
     failed on timeouts and deployment stopped.
   - Learning goal of the project: operating an own runner, later ARC
     (actions-runner-controller) in the cluster.
-  - Persistent caches for Gradle, npm and Docker layers.
+  - Persistent caches for Gradle and npm.
   - Future: direct access from jobs to the home cluster for e2e tests.
 - The repository is public.
 - The workflows relied on tools preinstalled on `ubuntu-latest`, which a bare machine lacks

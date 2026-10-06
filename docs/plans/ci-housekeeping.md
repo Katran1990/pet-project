@@ -282,7 +282,7 @@ No backend, frontend, DB migration or config changes. No new dependencies. No ne
   - (c) `type=gha` layer cache. Keep it: without it every image build is cold.
 - **Q4, the ADR 0006 "Amended" line.** It still says "the amendment is proposed until merged", and that amendment (PR #38) is merged. The plan updates the line together with accepting ADR 0021. This goes slightly beyond the card's "0020 and 0021".
 - **ADR deviation, stated explicitly:** ADR 0021 gets a new Decision bullet (no GitHub Actions cache for dependencies), a new Alternatives bullet and new Consequences, all before it is marked accepted. It is an amendment of a proposed ADR, not a change to an accepted one. No existing Decision bullet changes.
-  - Context line 13, "Persistent caches for Gradle, npm and Docker layers", is left as the original motivation. In fact, Docker build layers do not persist on the host, because the builder is removed per job.
+  - Context line 13, "Persistent caches for Gradle, npm and Docker layers", is left as the original motivation. In fact, Docker build layers do not persist on the host, because the builder is removed per job. **Changed after review at the user's request:** the line now reads "Persistent caches for Gradle and npm."
   - ADR 0007 keeps its text. Its alternatives mention DB caching as one reason for choosing the action, but its Decision does not require caching.
 - **Timing comparability:**
   - "Before" CI runs are `push` events and "after" is a `pull_request` event; the jobs are the same.
