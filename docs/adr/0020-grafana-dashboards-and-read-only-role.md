@@ -1,15 +1,15 @@
 # 0020. Grafana dashboards as code and a read-only database role
 
 Date: 2026-10-04
-Status: proposed
+Status: accepted
 
 ## Context
 Grafana runs without persistence (ADR 0019), so dashboards edited in the UI are lost on
 restart. The card asks for a pinned community JVM dashboard for dev and prod, and a
 "Wallet" dashboard on the prod database with the same SQL as `/api/reports/by-category`
 (ADR 0017). Grafana needs a database user that can only read. The Flyway user is the
-Postgres superuser everywhere. This decision comes from the plan on branch
-`feature/grafana-dashboards`, which is not merged yet.
+Postgres superuser everywhere. This decision comes from the plan in
+`docs/plans/grafana-dashboards.md`.
 
 ## Decision
 - **Dashboards as code:**
@@ -91,4 +91,3 @@ Postgres superuser everywhere. This decision comes from the plan on branch
   `secretKeyRef` rule of ADR 0003, which is scoped to the backend.
 - Upgrading a community dashboard means downloading the new revision, re-running the jq
   program and reviewing the diff.
-- The status becomes `accepted` once the branch is merged.

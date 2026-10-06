@@ -2,7 +2,7 @@
 
 Date: 2026-09-21
 Status: accepted
-Amended: 2026-10-05 for the self-hosted runner (ADR 0021); the amendment is proposed until merged.
+Amended: 2026-10-05 for the self-hosted runner (ADR 0021).
 
 ## Context
 A broken Helm chart or workflow used to surface only at deploy time. The draft workflows
