@@ -1,7 +1,7 @@
 # CI: runs on every pull request and on every push to development / main.
-# Six independent jobs (backend, frontend, the Helm chart check, the Grafana dashboards check,
-# actionlint and the Trivy dependency scan) run in parallel on separate runners, or one after
-# another when only one runner instance is online.
+# Seven independent jobs (backend, frontend, the e2e type-check, the Helm chart check, the Grafana
+# dashboards check, actionlint and the Trivy dependency scan) run in parallel on separate runners,
+# or one after another when only one runner instance is online.
 #
 # Runner selection (ADR 0021): every job runs on the self-hosted runner [self-hosted, home],
 # except pull requests from forks, from a deleted fork and from Dependabot, which run on
@@ -120,6 +120,44 @@ jobs:
       # so no backend or database is needed.
       - name: Test
         run: npm test
+
+  e2e-check:
+    name: E2E type-check (Playwright)
+    runs-on: ${{ github.event_name == 'pull_request' && (github.event.pull_request.head.repo.full_name != github.repository || github.event.pull_request.user.login == 'dependabot[bot]') && 'ubuntu-latest' || fromJSON('["self-hosted","home"]') }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: e2e
+    steps:
+      # clean: true - the self-hosted runner reuses _work
+      - uses: actions/checkout@v6
+        with:
+          clean: true
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.21.0"       # exact pin (ADR 0006)
+          package-manager-cache: false
+
+      # No browser here: the post-deploy run (e2e.yml, ADR 0022) is the only one that needs it.
+      - name: Install dependencies
+        run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      - name: Type-check
+        run: npm run typecheck
+
+      # node:test with a fake fetch and clock, no network.
+      - name: Unit tests of the wait script
+        run: npm run test:scripts
+
+      # Loads the config and discovers the tests without a browser or network.
+      - name: List tests
+        run: npx playwright test --list
+        env:
+          E2E_BASE_URL: http://e2e.invalid
 
   helm:
     name: Helm chart

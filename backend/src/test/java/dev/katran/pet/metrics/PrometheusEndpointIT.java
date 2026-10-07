@@ -1,11 +1,20 @@
 package dev.katran.pet.metrics;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.ServerSocket;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.List;
 
 import dev.katran.pet.TestcontainersConfiguration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
@@ -104,6 +113,63 @@ class PrometheusEndpointIT {
 				.doesNotExist()
 				.jsonPath("$._links.configprops")
 				.doesNotExist();
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = { "/api/..;/actuator/prometheus", "/api/%2e%2e;/actuator/prometheus" })
+	void pathParameterTraversalDoesNotReachActuator(String path) throws Exception {
+		// Tomcat strips ";" path parameters before it resolves "..", so nginx's "location /api/" could
+		// in theory let /api/..;/actuator/prometheus through to /actuator/prometheus. Verified: the
+		// backend answers 404, so no nginx rule is needed (ADR 0022). Regression guard.
+		// URI.create and HttpClient keep the path as written (no dot-segment removal).
+		HttpResponse<String> response = HttpClient.newHttpClient()
+				.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path)).GET().build(),
+						HttpResponse.BodyHandlers.ofString());
+		assertThat(response.statusCode()).isEqualTo(404);
+		assertThat(response.body()).doesNotContain("jvm_memory_used_bytes");
+	}
+
+	@Test
+	void probeHttpClientSendsTraversalPathsUnchanged() throws Exception {
+		// Guards the probe above against passing vacuously: the request line on the wire must carry
+		// the path exactly as written (no dot-segment removal by URI or HttpClient).
+		for (String path : List.of("/api/..;/actuator/prometheus", "/api/%2e%2e;/actuator/prometheus")) {
+			try (ServerSocket server = new ServerSocket(0)) {
+				server.setSoTimeout(5000);
+				Thread sender = Thread.ofVirtual().start(() -> {
+					try {
+						HttpClient.newHttpClient()
+								.send(HttpRequest.newBuilder(URI.create("http://localhost:" + server.getLocalPort() + path))
+										.timeout(Duration.ofSeconds(2))
+										.GET()
+										.build(), HttpResponse.BodyHandlers.discarding());
+					}
+					catch (Exception ex) {
+						// the fake server never answers; only the request line matters
+					}
+				});
+				try (var socket = server.accept()) {
+					socket.setSoTimeout(5000);
+					String requestLine = new BufferedReader(new InputStreamReader(socket.getInputStream())).readLine();
+					assertThat(requestLine).isEqualTo("GET " + path + " HTTP/1.1");
+				}
+				sender.join();
+			}
+		}
+	}
+
+	@Test
+	void positiveControlRawHttpClientSeesMetricsOnTheRealActuatorPath() throws Exception {
+		// Same client and same body check as the traversal probe, but on the real path: proves the
+		// "no jvm_memory_used_bytes" assertion there can fail when metrics are served.
+		await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+			HttpResponse<String> response = HttpClient.newHttpClient()
+					.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/actuator/prometheus"))
+							.GET()
+							.build(), HttpResponse.BodyHandlers.ofString());
+			assertThat(response.statusCode()).isEqualTo(200);
+			assertThat(response.body()).contains("jvm_memory_used_bytes");
+		});
 	}
 
 }

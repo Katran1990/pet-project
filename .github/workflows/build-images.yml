@@ -92,6 +92,10 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.service }}
+          # backend only: the checkout's .git as named context "gitdir" (replaces the empty stage in
+          # backend/Dockerfile), so the jar's git.properties carries this commit (ADR 0022).
+          build-contexts: ${{ matrix.service == 'backend' && 'gitdir=.git' || '' }}
+          build-args: ${{ matrix.service == 'backend' && 'REQUIRE_GIT_DIR=true' || '' }}
           push: false
           load: true
           tags: ${{ steps.meta.outputs.tags }}

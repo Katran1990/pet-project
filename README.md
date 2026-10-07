@@ -16,6 +16,7 @@ React single-page frontend.
 ```
 .github/    CI workflows (tests, Docker image builds)
 backend/    Spring Boot application (dev.katran.pet)
+e2e/        Playwright end-to-end tests (run against dev after deploy)
 frontend/   Vite + React single-page app
 infra/      infrastructure files
 ```
@@ -104,6 +105,7 @@ by default, and the date of expenses created by `POST /api/quick-templates/{id}/
 | `DELETE` | `/api/quick-templates/{id}` | Deletes a template; expenses created from it are kept; 204, or 404 if unknown |
 | `POST` | `/api/quick-templates/{id}/apply` | Creates an expense dated today (APP_TIME_ZONE) with the template's amount and category; optional JSON body {"amount": "...", "note": "..."} overrides amount and note (a null or "" amount means no override; a body without Content-Type application/json is 415); 201 with the created expense (same body as POST /api/expenses); 409 if the template's category is archived |
 | `GET`  | `/actuator/health` | Application health           |
+| `GET`  | `/actuator/info` | Git commit of the build (`git.commit.id`, `git.commit.id.abbrev`, `git.commit.time`); no branch, author or message. Behind nginx, `/api/actuator/health` and `/api/actuator/info` are the only reachable actuator paths (ADR 0022) |
 | `GET`  | `/actuator/prometheus` | Metrics in the Prometheus text format (Micrometer), e.g. `http_server_requests_seconds`, `jvm_memory_used_bytes`; unauthenticated, intended for in-cluster scraping only (see "Deploy") |
 
 Errors are returned as RFC 9457 Problem Details (`application/problem+json`) with `type`, `title`, `status`, `detail` and `instance`. Validation errors (400) additionally contain `errors: [{"field": "...", "message": "..."}]`.
@@ -111,6 +113,43 @@ Errors are returned as RFC 9457 Problem Details (`application/problem+json`) wit
 Money amounts are JSON strings with two decimals (`"200.00"`). `currency` is always `PLN` for now and is not accepted in requests. Percentages (`share`) are JSON strings with one decimal (`"64.8"`).
 
 In JSON request bodies, an empty string (`""`) in a numeric field is read as `null`: a required field then fails with `errors[{field, "must not be null"}]`, a PATCH field stays unchanged, and an apply override is not applied. Integer fields such as `categoryId` and `sortOrder` reject any JSON number with a fraction or an exponent (`1.5`, `7.0`, `1e1`) with 400 without `errors[]`.
+
+## E2E tests
+
+- **What runs and when:** `.github/workflows/e2e.yml` runs after "Update deploy manifests"
+  succeeded for `development`. It waits up to 10 minutes until `/api/actuator/info` of dev
+  reports the deployed commit, then runs the Playwright tests in `e2e/` (a smoke test and a
+  create category / create expense / report / clean up scenario). It is not a gate: a red run
+  blocks nothing. Decision: [ADR 0022](docs/adr/0022-post-deploy-e2e-tests-on-dev.md).
+- **Base URL:** the repository variable `E2E_BASE_URL` (Settings > Secrets and variables >
+  Actions > Variables), e.g. `http://dev.pet.local`. It is never hard-coded.
+- **Run locally:**
+
+  ```bash
+  cd e2e && npm ci
+  npx playwright install chromium     # on bare Linux also: sudo npx playwright install-deps chromium
+  E2E_BASE_URL=<url> npm run e2e
+  npx playwright show-report
+  ```
+
+  The base URL must serve the production nginx routing (the Vite dev server does not map
+  `/api/actuator/*`). Never point the tests at prod: they write data.
+- **Test data:** category names and expense notes are `e2e-<runId>-<nonce>`. The test deletes
+  its expense and archives its category (categories cannot be deleted).
+- **Failure artifacts:** the Playwright HTML report and traces are uploaded for 7 days. The
+  repository is public, so any signed-in GitHub user can download them; they show dev data
+  and the dev host name.
+- **Clean up leftovers** (dev only; archived categories accumulate and cancelled runs can leave
+  an active one), as one transaction:
+
+  ```sql
+  begin;
+  delete from expense where category_id in (select id from category where name like 'e2e-%');
+  delete from category where name like 'e2e-%';
+  commit;
+  ```
+- `ci.yml` has a job `e2e-check` (type-check, unit tests of the wait script, `playwright test
+  --list`), with no browser and no network.
 
 ## CI and Docker images
 
@@ -126,6 +165,7 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
   `infra/monitoring/dashboards/*.json` is valid JSON with a `uid` and a `title`, has no
   grafana.com import inputs, and `kustomize` (pinned v5.6.0) renders it into a labelled ConfigMap),
   a Trivy dependency scan (see "Dependency vulnerability scanning (Trivy)" below),
+  the `e2e-check` job (type-check of `e2e/`, see "E2E tests"),
   and actionlint over `.github/workflows/`. All jobs run on the self-hosted runner; see
   "CI runner" below. Run the same checks locally with
   `docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color`
@@ -169,6 +209,9 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
   docker build -t pet-frontend frontend
   ```
 
+  Optionally add `--build-context gitdir=.git` to the backend build so the jar carries
+  `git.properties` (the commit shown by `/actuator/info`); without it the jar has none.
+
 - The backend image reads `DB_URL`, `DB_USER`, `DB_PASSWORD`,
   `DB_STARTUP_WAIT_TIMEOUT`, `DB_STARTUP_WAIT_INTERVAL` and `APP_TIME_ZONE`
   at runtime.
@@ -177,8 +220,8 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
 
 ### Dependency vulnerability scanning (Trivy)
 
-- **What runs where:** a filesystem scan of `backend/gradle.lockfile` and
-  `frontend/package-lock.json` runs in `ci.yml` on every PR and on every push
+- **What runs where:** a filesystem scan of `backend/gradle.lockfile`,
+  `frontend/package-lock.json` and `e2e/package-lock.json` runs in `ci.yml` on every PR and on every push
   to `development`/`main`. An image scan of the built `backend` and
   `frontend` images runs in `build-images.yml` before they are pushed.
 - **What fails:** fixed HIGH and CRITICAL findings fail the job. MEDIUM, LOW
@@ -226,8 +269,8 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
 ## CI runner
 
 - **Where it runs:** a self-hosted GitHub Actions runner on a home machine, labels
-  `self-hosted` and `home`. It runs every job of `ci.yml`, `build-images.yml` and
-  `update-deploy.yml`. Pull requests from forks, from a deleted fork and from Dependabot run
+  `self-hosted` and `home`. It runs every job of `ci.yml`, `build-images.yml`,
+  `update-deploy.yml` and `e2e.yml`. Pull requests from forks, from a deleted fork and from Dependabot run
   `ci.yml` on GitHub-hosted `ubuntu-latest` instead (the `runs-on` expression). Own-branch
   PRs and pushes use the self-hosted runner. Decision and trust boundaries:
   [ADR 0021](docs/adr/0021-self-hosted-ci-runner.md).
@@ -238,8 +281,14 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
 - **Host baseline:** Ubuntu LTS on x86_64, the runner as a systemd service under a dedicated
   non-root user, Docker Engine (rootful, the runner user in the `docker` group; Testcontainers
   needs the Docker socket), git >= 2.32, bash, coreutils, grep, curl, ca-certificates, tar,
-  gzip and xz-utils. Everything else is installed by the jobs with pinned versions; the
+  gzip and xz-utils, plus the shared libraries Chromium needs for `e2e.yml`, installed once by
+  hand with `sudo npx playwright@1.63.0 install-deps chromium` (repeat after each Playwright
+  bump). Everything else is installed by the jobs with pinned versions; the
   list of pins is in [ADR 0006](docs/adr/0006-ci-validation-and-pinning.md).
+- **E2E prerequisites:** the host must resolve and reach the host in `E2E_BASE_URL` (for
+  example an `/etc/hosts` entry pointing at the k3d ingress). Every push to `development`
+  keeps the single runner busy for the deploy wait (up to 10 minutes) plus the tests, and
+  later jobs queue behind it.
 - **Restart the service:** in the runner directory, `sudo ./svc.sh status`,
   `sudo ./svc.sh stop`, `sudo ./svc.sh start`. Or use
   `sudo systemctl restart actions.runner.<owner>-<repo>.<runner-name>.service`. Jobs wait in
@@ -354,8 +403,9 @@ In JSON request bodies, an empty string (`""`) in a numeric field is read as `nu
   keeps writing to that branch. After that, nothing reads or writes it any
   more; it is kept as-is for history.
 - Add `dev.pet.local` / `pet.local` / `grafana.pet.local` to `/etc/hosts` for the local k3d cluster.
-- Metrics: the Ingress and the frontend's nginx route only `/api/` to the
-  backend; `/actuator/prometheus` is meant to be scraped from inside the
+- Metrics: the Ingress and the frontend's nginx route `/api/` plus exactly
+  `/api/actuator/health` and `/api/actuator/info` (mapped to the backend's
+  `/actuator/...`, ADR 0022) to the backend; `/actuator/prometheus` is meant to be scraped from inside the
   cluster, where it is served without authentication at
   `http://backend:8080/actuator/prometheus`. The backend Service has the label
   `app: backend` and its port is named `http`, so a Prometheus Operator

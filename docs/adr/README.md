@@ -27,3 +27,4 @@ Check this index before proposing a convention; a new ADR starts as `proposed` a
 | [0019](0019-monitoring-stack.md) | Monitoring: Micrometer metrics, kube-prometheus-stack, one Argo CD app per concern | accepted | 2026-10-04 |
 | [0020](0020-grafana-dashboards-and-read-only-role.md) | Grafana dashboards as code and a read-only database role | accepted | 2026-10-04 |
 | [0021](0021-self-hosted-ci-runner.md) | Self-hosted CI runner, fork pull requests on GitHub-hosted runners | accepted | 2026-10-05 |
+| [0022](0022-post-deploy-e2e-tests-on-dev.md) | Post-deploy end-to-end tests on dev | proposed | 2026-10-06 |
