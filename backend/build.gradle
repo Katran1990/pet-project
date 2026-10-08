@@ -2,6 +2,7 @@ plugins {
 	id 'java'
 	id 'org.springframework.boot' version '4.1.1'
 	id 'io.spring.dependency-management' version '1.1.7'
+	id 'com.gorylenko.gradle-git-properties' version '4.0.1'
 }
 
 group = 'dev.katran'
@@ -16,6 +17,20 @@ java {
 
 repositories {
 	mavenCentral()
+}
+
+// Writes git.properties into the jar so /actuator/info reports the deployed commit (ADR 0022).
+// Only the commit id and time are kept: no branch (CI and Docker builds have a detached HEAD),
+// no author, no message (the endpoint is public through nginx).
+gitProperties {
+	keys = ['git.commit.id', 'git.commit.id.abbrev', 'git.commit.time']
+	// Checkout: .git at the repo root. Docker build: -PgitDir=<read-only mount of the gitdir
+	// context>. Git worktrees work too (verified: the .git file is followed; -PgitDir=$(git
+	// rev-parse --git-dir) also works).
+	dotGitDirectory = providers.gradleProperty('gitDir')
+			.map { layout.projectDirectory.dir(it) }
+			.orElse(layout.projectDirectory.dir('../.git'))
+	failOnNoGitDirectory = false   // builds without .git (local docker build, source tarball) still work
 }
 
 dependencyLocking {

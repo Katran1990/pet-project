@@ -3,6 +3,7 @@
 Date: 2026-10-05
 Status: accepted
 Amended: 2026-10-06, before acceptance: no GitHub Actions cache for Gradle, npm and the Trivy scans.
+Amended: 2026-10-06: `workflow_run` may also follow a chain of `workflow_run` workflows that starts at a push-only workflow (ADR 0022); `ci.yml` has seven jobs.
 
 ## Context
 - CI moves from GitHub-hosted runners to a self-hosted runner on a home machine. Cost is not
@@ -29,7 +30,9 @@ Amended: 2026-10-06, before acceptance: no GitHub Actions cache for Gradle, npm 
   (`head.repo.full_name != github.repository`). Every future job triggered by `pull_request`
   must use the same expression.
 - `pull_request_target` is never used.
-- `workflow_run` on the self-hosted runner may only follow push-only workflows.
+- `workflow_run` on the self-hosted runner may only follow push-only workflows, directly or
+  through a chain of `workflow_run` workflows that starts at one (`e2e.yml` -> "Update deploy
+  manifests" -> "Build images").
 - "Require approval for all external contributors" (Settings, Actions, General, Fork pull
   request workflows) is required and stays enabled.
 - Every checkout uses `clean: true`. It removes untracked and changed files but keeps
@@ -140,7 +143,7 @@ Amended: 2026-10-06, before acceptance: no GitHub Actions cache for Gradle, npm 
   saved by an earlier run of the same PR.
 
 ## Consequences
-- With one runner instance, `ci.yml`'s six jobs and the two matrix legs run one after
+- With one runner instance, `ci.yml`'s seven jobs and the two matrix legs run one after
   another, so wall-clock time grows.
 - Host maintenance (OS and Docker updates) is manual. A systemd timer that runs
   `docker system prune` weekly should be installed by hand (README "CI runner"). The runner

@@ -1,0 +1,106 @@
+# Post-deploy end-to-end tests against dev (ADR 0022).
+#
+# Runs after "Update deploy manifests" succeeded for a push to development. It waits until the
+# dev backend reports the deployed commit through /api/actuator/info (10 minutes at most), then
+# runs the Playwright tests in e2e/ against the repository variable E2E_BASE_URL.
+#
+# This is NOT a gate: a red run blocks neither the promotion to main nor a rollback. It runs
+# for development only, because prod is not a place for tests that write data.
+#
+# workflow_run always runs the copy of this file on the default branch (main, ADR 0004), so
+# changes to this file take effect only once they reach main. The tests themselves come from
+# the deployed commit (head_sha).
+name: E2E (dev)
+
+on:
+  workflow_run:
+    workflows: ["Update deploy manifests"]
+    types: [completed]
+    branches: [development]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-dev
+  cancel-in-progress: true   # a newer deploy supersedes the older run (its SHA will never be served)
+
+jobs:
+  e2e:
+    name: Playwright against dev
+    # "Update deploy manifests" follows the push-only "Build images", so no fork code gets here;
+    # the head_repository check is a fail-closed extra guard (ADR 0021).
+    if: >-
+      github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.head_branch == 'development'
+      && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: [self-hosted, home]
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: e2e
+    steps:
+      # The tests match the deployed code (the default ref for workflow_run would be main).
+      # Only a contents: read token, like the ci.yml jobs, so no workspace wipe is needed
+      # (ADR 0021 asks for it for token-bearing workflows only).
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          clean: true
+          persist-credentials: false
+          sparse-checkout: e2e
+
+      - name: Check E2E_BASE_URL
+        env:
+          E2E_BASE_URL: ${{ vars.E2E_BASE_URL }}
+        run: |
+          if [ -z "$E2E_BASE_URL" ]; then
+            echo "::error::E2E_BASE_URL is empty: create the repository variable E2E_BASE_URL (Settings > Secrets and variables > Actions > Variables)"
+            exit 1
+          fi
+
+      # A step, because the runner context is not available in job-level env. RUNNER_TEMP is
+      # emptied per job, so no browser stays on the host.
+      - name: Keep Playwright browsers in RUNNER_TEMP
+        run: echo "PLAYWRIGHT_BROWSERS_PATH=${RUNNER_TEMP}/ms-playwright" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24.21.0"       # exact pin (ADR 0006)
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The Playwright version is pinned by e2e/package-lock.json (@playwright/test 1.63.0), which
+      # fixes the Chromium build. Only Chromium is installed (ADR 0006, ADR 0022). System libraries
+      # are a one-time host step (README, "CI runner").
+      - name: Install Chromium (pinned)
+        run: |
+          npx playwright install --only-shell chromium
+          npx playwright --version
+
+      # The installs run first so they overlap with Argo CD's sync; the 10 minutes start here.
+      - name: Wait until dev runs this commit
+        run: node scripts/wait-for-deploy.ts
+        env:
+          E2E_BASE_URL: ${{ vars.E2E_BASE_URL }}
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Run Playwright
+        run: npm run e2e
+        env:
+          E2E_BASE_URL: ${{ vars.E2E_BASE_URL }}
+          E2E_RUN_ID: gh-${{ github.run_id }}-${{ github.run_attempt }}
+
+      # A failed wait produces no report, hence if-no-files-found: ignore.
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: e2e-playwright-report-attempt-${{ github.run_attempt }}
+          path: |
+            e2e/playwright-report
+            e2e/test-results
+          retention-days: 7
+          if-no-files-found: ignore

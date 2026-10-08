@@ -1,3 +1,8 @@
+# Empty by default. build-images.yml overrides this stage with the named build context "gitdir"
+# (the checkout's .git), so the jar's git.properties carries the built commit (ADR 0022).
+# BuildKit replaces a stage of the same name with a named context.
+FROM scratch AS gitdir
+
 # Stage 1: build the jar with Gradle
 FROM eclipse-temurin:25-jdk AS build
 WORKDIR /app
@@ -10,8 +15,17 @@ COPY gradle ./gradle
 RUN ./gradlew dependencies --no-daemon > /dev/null 2>&1 || true
 
 COPY src ./src
-# Tests already ran in CI; here we only build the artifact
-RUN ./gradlew bootJar --no-daemon
+# Tests already ran in CI; here we only build the artifact.
+# The bind mount is read-only and never copied into a layer: Gradle reads .git through
+# -PgitDir (see build.gradle). With REQUIRE_GIT_DIR=true a missing context, or a plugin that
+# silently generated nothing, fails the image build instead of surfacing later as an e2e timeout.
+ARG REQUIRE_GIT_DIR=false
+RUN --mount=type=bind,from=gitdir,target=/tmp/gitdir \
+    if [ -f /tmp/gitdir/HEAD ]; then set -- -PgitDir=/tmp/gitdir; \
+    elif [ "$REQUIRE_GIT_DIR" = true ]; then echo "build context gitdir (.git) is missing" >&2; exit 1; fi; \
+    ./gradlew bootJar --no-daemon "$@" \
+    && if [ "$REQUIRE_GIT_DIR" = true ] && [ ! -f build/resources/main/git.properties ]; then \
+         echo "git.properties was not generated" >&2; exit 1; fi
 
 # Stage 2: minimal runtime image (JRE only, no Gradle, no sources)
 FROM eclipse-temurin:25-jre
