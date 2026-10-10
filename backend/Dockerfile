@@ -27,9 +27,16 @@ RUN --mount=type=bind,from=gitdir,target=/tmp/gitdir \
     && if [ "$REQUIRE_GIT_DIR" = true ] && [ ! -f build/resources/main/git.properties ]; then \
          echo "git.properties was not generated" >&2; exit 1; fi
 
-# Stage 2: minimal runtime image (JRE only, no Gradle, no sources)
-FROM eclipse-temurin:25-jre
+# Stage 2: minimal runtime image (JRE only, no Gradle, no sources). build-images.yml excludes
+# the stage "runtime" from the layer cache (no-cache-filters), so the upgrade runs on every CI build.
+FROM eclipse-temurin:25-jre AS runtime
 WORKDIR /app
+
+# Pick up Ubuntu security fixes published since the base image was built (as root, before USER).
+# /usr/bin/pebble comes from the Ubuntu 26.04 base image and the application does not use it
+# (the entrypoint is java). It belongs to no dpkg package, so apt never updates it: remove it
+# so that dead code is not scanned.
+RUN apt-get update && apt-get upgrade -y && rm -f /usr/bin/pebble && rm -rf /var/lib/apt/lists/*
 
 # Run as a non-root user
 RUN useradd --system --uid 1001 app
