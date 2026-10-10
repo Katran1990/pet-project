@@ -104,6 +104,11 @@ jobs:
           # jobs do not evict each other's cache
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          # The final stage "runtime" of both Dockerfiles upgrades the base image's OS packages.
+          # Never reuse it from the layer cache, so every build installs the distro fixes published
+          # so far (ADR 0007). The build stages (npm ci, npm run build, the Gradle dependency
+          # download) still come from the cache (ADR 0021).
+          no-cache-filters: runtime
 
       # Report run 1/2 (SARIF, all severities, never fails): feeds the Security tab.
       - name: Scan image (SARIF report)
