@@ -1,7 +1,9 @@
 # 0021. Self-hosted CI runner, fork pull requests on GitHub-hosted runners
 
 Date: 2026-10-05
-Status: proposed
+Status: accepted
+Amended: 2026-10-06, before acceptance: no GitHub Actions cache for Gradle, npm and the Trivy scans.
+Amended: 2026-10-06: `workflow_run` may also follow a chain of `workflow_run` workflows that starts at a push-only workflow (ADR 0022); `ci.yml` has seven jobs.
 
 ## Context
 - CI moves from GitHub-hosted runners to a self-hosted runner on a home machine. Cost is not
@@ -10,7 +12,7 @@ Status: proposed
     failed on timeouts and deployment stopped.
   - Learning goal of the project: operating an own runner, later ARC
     (actions-runner-controller) in the cluster.
-  - Persistent caches for Gradle, npm and Docker layers.
+  - Persistent caches for Gradle and npm.
   - Future: direct access from jobs to the home cluster for e2e tests.
 - The repository is public.
 - The workflows relied on tools preinstalled on `ubuntu-latest`, which a bare machine lacks
@@ -28,7 +30,9 @@ Status: proposed
   (`head.repo.full_name != github.repository`). Every future job triggered by `pull_request`
   must use the same expression.
 - `pull_request_target` is never used.
-- `workflow_run` on the self-hosted runner may only follow push-only workflows.
+- `workflow_run` on the self-hosted runner may only follow push-only workflows, directly or
+  through a chain of `workflow_run` workflows that starts at one (`e2e.yml` -> "Update deploy
+  manifests" -> "Build images").
 - "Require approval for all external contributors" (Settings, Actions, General, Fork pull
   request workflows) is required and stays enabled.
 - Every checkout uses `clean: true`. It removes untracked and changed files but keeps
@@ -42,6 +46,15 @@ Status: proposed
   `GIT_CONFIG_NOSYSTEM` on the checkout step. This needs git >= 2.32.
 - Tools are installed per job (ADR 0006). The host provides only the documented baseline
   (README "CI runner").
+- No GitHub Actions cache for dependencies: `setup-gradle` runs with `cache-disabled: true`
+  (it still validates the wrapper), `setup-java` and `setup-node` get no `cache` input and
+  `setup-node` has `package-manager-cache: false`, and every `trivy-action` step in `ci.yml`
+  and `build-images.yml` has `cache: "false"`. Gradle and npm use the runner user's `~/.gradle`
+  and `~/.npm`. The same steps run without a cache when a job lands on `ubuntu-latest`. A new
+  job adds no `actions/cache` or setup-action cache option without saying why host state is
+  not enough. The BuildKit layer cache (`type=gha`) in `build-images.yml` stays, because the
+  `docker-container` builder is removed at the end of every job. `setup-buildx-action` keeps
+  its default buildx binary cache (`cache-binary`).
 - `.github/actionlint.yaml` declares the `home` label.
 - Every job has a `timeout-minutes`, because a hung job blocks a single runner.
 
@@ -124,15 +137,26 @@ Status: proposed
 - Running the token-bearing jobs (`build-images.yml`, `update-deploy.yml`) on GitHub-hosted
   runners: rejected, because it defeats the reliability reason for the move.
 - An ephemeral self-hosted runner for the token-bearing jobs only: deferred.
+- Caches only for jobs on `ubuntu-latest` (a `runner.environment == 'github-hosted'`
+  condition on the cache inputs): rejected. Pushes to `development` and `main` run on the
+  self-hosted runner and save nothing, so a fork or Dependabot PR could only restore a cache
+  saved by an earlier run of the same PR.
 
 ## Consequences
-- With one runner instance, `ci.yml`'s six jobs and the two matrix legs run one after
+- With one runner instance, `ci.yml`'s seven jobs and the two matrix legs run one after
   another, so wall-clock time grows.
-- Host maintenance (OS and Docker updates, disk pruning) is manual; the runner application
-  updates itself.
+- Host maintenance (OS and Docker updates) is manual. A systemd timer that runs
+  `docker system prune` weekly should be installed by hand (README "CI runner"). The runner
+  application updates itself.
+- Fork and Dependabot PRs download every Gradle and npm dependency on each run.
+- Every Trivy scan job downloads the vulnerability DB (and the Java DB in "Build images")
+  fresh instead of restoring it from the GitHub Actions cache, because the default
+  `cache-dir` is inside the workspace, which "Build images" empties at the start of every job.
+  A failed download fails the job (ADR 0007).
+- `~/.gradle` and `~/.npm` grow on the host. Gradle removes unused cache entries itself;
+  `~/.npm` is cleared by hand (README "CI runner").
 - When the runner is offline, own PRs and pushes queue (and fail after 24 h), while fork and
   Dependabot PRs still run.
 - Changes to `update-deploy.yml` take effect only once they reach `main` (ADR 0004).
 - Changing the host baseline (for example the git minimum) means updating README
   "CI runner" and ADR 0006.
-- The status becomes `accepted` once the branch is merged.

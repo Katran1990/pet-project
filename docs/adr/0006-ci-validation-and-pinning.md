@@ -2,7 +2,8 @@
 
 Date: 2026-09-21
 Status: accepted
-Amended: 2026-10-05 for the self-hosted runner (ADR 0021); the amendment is proposed until merged.
+Amended: 2026-10-05 for the self-hosted runner (ADR 0021).
+Amended: 2026-10-06 for the post-deploy e2e tests (ADR 0022).
 
 ## Context
 A broken Helm chart or workflow used to surface only at deploy time. The draft workflows
@@ -31,15 +32,24 @@ repo token has write access to what Argo CD deploys to `prod`.
     newest build of it).
   - Nothing preinstalled on a runner may be relied on, except the host baseline in README
     "CI runner" (bash, coreutils, grep, git >= 2.32, curl, ca-certificates, tar/gzip/xz,
-    Docker Engine). The same rule applies on GitHub-hosted and self-hosted runners.
+    Docker Engine). The same rule applies on GitHub-hosted and self-hosted runners. The
+    self-hosted host baseline adds one more item for `e2e.yml`, which runs only there: the
+    shared libraries Chromium needs, installed once by hand with
+    `sudo npx playwright@1.63.0 install-deps chromium` (again after each Playwright bump).
   - Tool versions (as of 2026-10-05): Helm `v3.22.0` (never floating to Helm 4), actionlint
     1.7.12, Trivy v0.70.0 through the action's `version:` input, Java Temurin `25.0.4`
     (resolves to jdk-25.0.4.1+1), Node `24.21.0`, yq `v4.54.1`, jq `1.8.2`, kustomize
     `v5.6.0`, docker/buildx `v0.37.2`, moby/buildkit `v0.33.1`
-    (`sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea`).
+    (`sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea`),
+    `@playwright/test` `1.63.0`, whose Chromium headless shell is installed by
+    `npx playwright install --only-shell chromium`.
+  - One explicit exception: the Chromium download is done by Playwright's own installer from
+    its CDN. It is pinned by the lockfile-pinned package version, not by a SHA-256 in the
+    workflow, the same way `setup-node` downloads Node.
   - Where the pins live: `ci.yml` (`setup-java`/`setup-node` versions, the workflow `env`
     block with yq, jq and kustomize versions and checksums, `setup-helm`, Trivy, actionlint),
-    `build-images.yml` (buildx and BuildKit), `update-deploy.yml` (yq, same values as
+    `build-images.yml` (buildx and BuildKit), `e2e.yml` (setup-node and Playwright) with
+    `e2e/package-lock.json`, `update-deploy.yml` (yq, same values as
     `ci.yml`) and the README's local commands.
   - Every tag is checked to exist before it is committed.
 - **Infrastructure checks in `ci.yml`** (separate parallel jobs, on every PR and push):

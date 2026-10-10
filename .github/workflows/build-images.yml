@@ -92,6 +92,10 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.service }}
+          # backend only: the checkout's .git as named context "gitdir" (replaces the empty stage in
+          # backend/Dockerfile), so the jar's git.properties carries this commit (ADR 0022).
+          build-contexts: ${{ matrix.service == 'backend' && 'gitdir=.git' || '' }}
+          build-args: ${{ matrix.service == 'backend' && 'REQUIRE_GIT_DIR=true' || '' }}
           push: false
           load: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -100,6 +104,11 @@ jobs:
           # jobs do not evict each other's cache
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          # The final stage "runtime" of both Dockerfiles upgrades the base image's OS packages.
+          # Never reuse it from the layer cache, so every build installs the distro fixes published
+          # so far (ADR 0007). The build stages (npm ci, npm run build, the Gradle dependency
+          # download) still come from the cache (ADR 0021).
+          no-cache-filters: runtime
 
       # Report run 1/2 (SARIF, all severities, never fails): feeds the Security tab.
       - name: Scan image (SARIF report)
@@ -114,6 +123,9 @@ jobs:
           trivyignores: .trivyignore
           exit-code: "0"
           version: v0.70.0
+          # No GitHub Actions cache on the self-hosted runner (ADR 0021): the Trivy DB and
+          # binary are neither restored from it nor saved to it.
+          cache: "false"
         env:
           # Scan the local image built above, never pull the old branch tag from GHCR.
           TRIVY_IMAGE_SRC: docker

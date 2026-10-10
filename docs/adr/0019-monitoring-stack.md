@@ -2,6 +2,7 @@
 
 Date: 2026-10-04
 Status: accepted
+Amended: 2026-10-07: nginx also forwards exactly `/api/actuator/health` and `/api/actuator/info` (ADR 0022).
 
 ## Context
 The backend had only `health` and `info` actuator endpoints, and the cluster had no
@@ -14,7 +15,9 @@ Grafana admin credentials had to come from a SealedSecret.
   - `runtimeOnly io.micrometer:micrometer-registry-prometheus`, version from the Boot BOM;
   - actuator exposure `health,info,prometheus`;
   - `/actuator/prometheus` is unauthenticated and meant for in-cluster scraping only: the
-    Ingress routes to the frontend, and its nginx forwards only `/api/`;
+    Ingress routes to the frontend, and its nginx forwards only `/api/`
+    (refined by ADR 0022: nginx also forwards exactly `/api/actuator/health` and
+    `/api/actuator/info`; `/actuator/prometheus` stays in-cluster);
   - HTTP server timings are published as a percentile histogram, and every meter carries
     the tag `application=${spring.application.name}`;
   - the backend Service has the label `app: backend` and a port named `http`.
